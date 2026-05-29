@@ -12,7 +12,7 @@ database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
 # R2 binding — for property photos (see README step 3b)
 [[r2_buckets]]
 binding = "BUCKET"
-bucket_name = "vino-photos"
+bucket_name = "vino-photo"
 
 # Optional: if you make the bucket public (or attach a custom domain),
 # set its public URL here so photos are served straight from R2/CDN
