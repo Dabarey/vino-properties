@@ -1,27 +1,30 @@
-name = "vino"
-main = "index.js"
-compatibility_date = "2024-09-01"
+name       = "vino-worker"
+main       = "worker.js"
+compatibility_date = "2024-01-01"
 
-# D1 binding — replace database_id after you create the DB (see README step 3)
+# ── D1 DATABASE ─────────────────────────────
 [[d1_databases]]
-binding = "DB"
+binding      = "DB"           # matches env.DB in worker.js
 database_name = "vino-db"
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+database_id  = "3c851ce0-002c-4721-b81b-74d54ed7432d"   # ← paste from: wrangler d1 create vino-db
 
-# R2 binding — for property photos (see README step 3b)
-[[r2_buckets]]
-binding = "BUCKET"
-bucket_name = "vino-photo"
+# ── R2 BUCKET (static site: index.html) ─────
+# Uncomment if you serve index.html from R2 via a Worker route
+# [[r2_buckets]]
+# binding    = "ASSETS"
+# bucket_name = "vino-site"
 
-# Optional: if you make the bucket public (or attach a custom domain),
-# set its public URL here so photos are served straight from R2/CDN
-# instead of through this Worker. Leave commented to serve via the Worker
-# at <worker-url>/r2/<key>.
-# [vars]
-# PHOTO_BASE_URL = "https://pub-xxxxxxxx.r2.dev"
+# ── ROUTES ──────────────────────────────────
+# Uncomment and set your domain to route API calls to the Worker
+# routes = [
+#   { pattern = "vino.properties/api/*", zone_name = "vino.properties" }
+# ]
 
-# Secrets (do NOT put real values here — set them with `wrangler secret put`):
+# ── ENVIRONMENT VARIABLES ───────────────────
+# Non-secret config goes here
+[vars]
+ENVIRONMENT = "production"
+
+# Secrets (set via CLI, never stored here):
 #   wrangler secret put ADMIN_PASSWORD
-#   wrangler secret put AUTH_SALT
-# AUTH_SALT can be any long random string; keep it stable or all existing
-# password hashes become invalid.
+#   wrangler secret put ADMIN_PHONE
