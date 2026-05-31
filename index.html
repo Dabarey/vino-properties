@@ -1924,6 +1924,7 @@ async function doUserLogin(){
 
 // ── GOOGLE LOGIN ──
 function initGoogleLogin(){
+  if(userAccount)return; // already logged in
   if(typeof google==='undefined'||!google.accounts)return;
   google.accounts.id.initialize({
     client_id:'889621493932-c8q42ul2hjqa2a73o4n3t3mcojcq9n7j.apps.googleusercontent.com',
@@ -2849,7 +2850,7 @@ function autoSetProvince(){
 }
 
 function openPostAd(){
-  // Restore session if not loaded
+  // Restore session first — must happen before the userAccount check
   if(!userAccount){
     try{const s=lsGet('vino_user',null);if(s&&s.id)userAccount=s;}catch{}
   }
@@ -2863,17 +2864,19 @@ function openPostAd(){
   document.getElementById('pad_beds').value=0;document.getElementById('pad_baths').value=0;
   document.querySelectorAll('#postAdOverlay .acb-row input').forEach(c=>c.checked=false);
 
-  // If logged in — pre-fill and hide password fields
   if(userAccount){
+    // Logged in — pre-fill, hide all manual fields + Google section
     document.getElementById('pad_name').value=userAccount.name||'';
     document.getElementById('pad_phone').value=userAccount.phone||'';
-
     document.getElementById('padPasswordFields').style.display='none';
+    document.getElementById('padContactFields').style.display='none';
     document.getElementById('padLoggedInInfo').style.display='block';
     document.getElementById('padLoggedName').textContent=userAccount.name||userAccount.phone;
     document.getElementById('padGoogleSection').style.display='none';
   } else {
+    // Not logged in — show everything
     ['pad_name','pad_phone'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+    document.getElementById('padContactFields').style.display='block';
     document.getElementById('padPasswordFields').style.display='block';
     document.getElementById('padLoggedInInfo').style.display='none';
     document.getElementById('padGoogleSection').style.display='block';
@@ -3052,8 +3055,8 @@ function padNext(step){
     const p=document.getElementById('pad_price').value;
     const l=document.getElementById('pad_location').value;
     const d=document.getElementById('pad_desc').value.trim();
-    const n=document.getElementById('pad_name').value.trim();
-    const ph=document.getElementById('pad_phone').value.trim();
+    const n=userAccount?userAccount.name:document.getElementById('pad_name').value.trim();
+    const ph=userAccount?userAccount.phone:document.getElementById('pad_phone').value.trim();
     if(!t||!p){alert('Please fill in Title and Price.');return;}
     if(!l){alert('Please select a City / Area.');return;}
     if(!d){alert('Please add a Description.');return;}
@@ -3110,8 +3113,8 @@ async function submitAd(){
     description:document.getElementById('pad_desc').value.trim(),
     // submission meta stored in description suffix
     status:'pending',
-    submitter_name:document.getElementById('pad_name').value.trim(),
-    submitter_phone:document.getElementById('pad_phone').value.trim(),
+    submitter_name:userAccount?userAccount.name:document.getElementById('pad_name').value.trim(),
+    submitter_phone:userAccount?userAccount.phone:document.getElementById('pad_phone').value.trim(),
     submitter_email:'',
     country: (document.getElementById('af_country')?document.getElementById('af_country').value:currentCountry)||'LK',
     package_name:pkg.name,
