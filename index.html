@@ -1880,10 +1880,17 @@ async function boostProp(id){
 // ── USER ACCOUNT (auto-create on ad submit) ──
 async function createUserAccount(phone, name, refCode, customPw){
   const pw = customPw || (Math.random().toString(36).slice(2,5).toUpperCase() + Math.floor(100+Math.random()*900));
+  // Try API, fall back to localStorage
   try{
-    const data = await apiFetch('/api/users/register',{method:'POST',body:JSON.stringify({phone,name,password:pw,ref_code:refCode})});
-    return pw;
-  }catch(e){ return pw; }
+    await apiFetch('/api/users/register',{method:'POST',body:JSON.stringify({phone,name,password:pw,ref_code:refCode})});
+  }catch(e){
+    const accounts=lsGet('vino_accounts',[]);
+    const idx=accounts.findIndex(a=>a.phone===phone);
+    if(idx>=0){accounts[idx].password=pw;accounts[idx].ref_code=refCode;}
+    else accounts.push({id:Date.now(),phone,name,password:pw,ref_code:refCode,created_at:new Date().toISOString()});
+    lsSet('vino_accounts',accounts);
+  }
+  return pw;
 }
 
 // ── USER LOGIN PORTAL ──
@@ -1916,10 +1923,16 @@ async function doUserLogin(){
   const phone=document.getElementById('ulPhone').value.trim();
   const pw=document.getElementById('ulPw').value.trim();
   if(!phone||!pw){alert('Enter phone and password.');return;}
+  // Try API first, fall back to localStorage
   try{
     const data=await apiFetch('/api/users/login',{method:'POST',body:JSON.stringify({phone,password:pw})});
-    userAccount=data;lsSet('vino_user',data);showUserDashboard();
-  }catch(e){document.getElementById('ulError').style.display='block';}
+    userAccount=data;lsSet('vino_user',data);showUserDashboard();return;
+  }catch(e){}
+  // Fallback: localStorage
+  const accounts=lsGet('vino_accounts',[]);
+  const data=accounts.find(a=>a.phone===phone&&a.password===pw);
+  if(data){userAccount=data;lsSet('vino_user',data);showUserDashboard();}
+  else{document.getElementById('ulError').style.display='block';}
 }
 
 // ── GOOGLE LOGIN ──
@@ -1960,7 +1973,20 @@ async function handleGoogleLogin(response){
     const name=payload.name||payload.email.split('@')[0];
     const email=payload.email||'';
     const gid=payload.sub||'';
-    const data=await apiFetch('/api/users/google',{method:'POST',body:JSON.stringify({google_id:gid,name,email})});
+    let data;
+    // Try API, fall back to localStorage
+    try{
+      data=await apiFetch('/api/users/google',{method:'POST',body:JSON.stringify({google_id:gid,name,email})});
+    }catch(e){
+      const accounts=lsGet('vino_accounts',[]);
+      data=accounts.find(a=>a.google_id===gid)||accounts.find(a=>a.phone===email);
+      if(!data){
+        const refCode='G-'+gid.slice(-6).toUpperCase();
+        const pw=Math.random().toString(36).slice(2,8).toUpperCase();
+        data={id:Date.now(),name,phone:email,password:pw,ref_code:refCode,google_id:gid,created_at:new Date().toISOString()};
+        accounts.push(data);lsSet('vino_accounts',accounts);
+      }
+    }
     userAccount=data;lsSet('vino_user',data);
     const padOverlay=document.getElementById('postAdOverlay');
     if(padOverlay&&padOverlay.classList.contains('open')){
@@ -1986,7 +2012,11 @@ async function showUserDashboard(){
   document.getElementById('ulDashboard').style.display='block';
   document.getElementById('ulWelcome').textContent='Welcome, '+userAccount.name+'!';
   let data=[];
-  try{data=await apiFetch('/api/submissions/user/'+userAccount.ref_code);}catch{}
+  try{data=await apiFetch('/api/submissions/user/'+userAccount.ref_code);}
+  catch{
+    const allSubs=lsGet('vino_submissions',[]);
+    data=allSubs.filter(s=>s.ref_code===userAccount.ref_code).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+  }
   const list=document.getElementById('ulAdList');
   if(!data||data.length===0){list.innerHTML='<p style="color:var(--muted);font-size:13px;text-align:center;padding:16px;">No ads submitted yet.</p>';return;}
   list.innerHTML=data.map(ad=>{
@@ -3258,7 +3288,8 @@ async function loadProps(){
     const data=await apiFetch('/api/properties');
     props=data.length>0?data.map(rowToP):[...DEF_PROPS];
   }catch(e){
-    props=[...DEF_PROPS];
+    // API not available — use default properties
+    if(!props.length) props=[...DEF_PROPS];
   }
   return true;
 }
