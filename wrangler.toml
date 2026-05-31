@@ -1,13 +1,12 @@
-
-name = "vino-realty"
+name = "vino"
 main = "worker.js"
-compatibility_date = "2024-01-01"
- 
-[site]
-bucket = "./"
- 
+compatibility_date = "2024-09-23"
+
 [[d1_databases]]
-binding = "DB"
+binding       = "DB"
 database_name = "vino-db"
-database_id = "3c851ce0-002c-4721-b81b-74d54ed7432d"
- 
+database_id   = "3c851ce0-002c-4721-b81b-74d54ed7432d"
+
+[[r2_buckets]]
+binding     = "PHOTOS"
+bucket_name = "vino-photos"
