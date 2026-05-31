@@ -1,4 +1,4 @@
-name = "vino"
+name = "vino-properties"
 main = "worker.js"
 compatibility_date = "2024-09-23"
 
