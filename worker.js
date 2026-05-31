@@ -17,7 +17,7 @@ export default {
     }
 
     if (url.pathname.startsWith('/api/')) {
-      const route = url.pathname.slice(5);
+      const route = url.pathname.slice(5).replace(/\/$/, '');
 
       // ── Serve photo from R2 ──
       if (request.method === 'GET' && route.startsWith('photo/')) {
@@ -44,7 +44,7 @@ export default {
         return cors(await handleQuery(env.DB, route, body));
       }
 
-      return cors(json({ error: { message: 'Unknown route' } }, 404));
+      return cors(json({ error: { message: 'Unknown route' }, debug: { route, method: request.method, pathname: url.pathname } }, 404));
     }
 
     return new Response('Not found', { status: 404 });
