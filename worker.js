@@ -2,21 +2,7 @@ import { getAssetFromKV } from "@cloudflare/kv-asset-handler";
 import manifestJSON from "__STATIC_CONTENT_MANIFEST";
 const assetManifest = JSON.parse(manifestJSON);
 
-// ── R2 helpers ──────────────────────────────────────────────────
-async function r2Get(bucket, key) {
-  const obj = await bucket.get(key);
-  if (!obj) return [];
-  const text = await obj.text();
-  try { return JSON.parse(text); } catch { return []; }
-}
-
-async function r2Put(bucket, key, data) {
-  await bucket.put(key, JSON.stringify(data), {
-    httpMetadata: { contentType: 'application/json' }
-  });
-}
-
-// ── CORS headers ─────────────────────────────────────────────────
+// ── CORS ─────────────────────────────────────────────────────────
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
@@ -30,78 +16,149 @@ function json(data, status = 200) {
   });
 }
 
-// ── Generic table CRUD via R2 ────────────────────────────────────
-// Tables: properties | user_accounts | ad_submissions
-async function handleTable(request, bucket, table) {
+// ── Allowed tables & their columns ───────────────────────────────
+const TABLES = {
+  properties: [
+    'id','type','title','location','province','price','beds','baths',
+    'area','land','land_perches','img','amenities','deed','badge','badge_key',
+    'description','link','listing_mode','country','photos',
+    'boosted','boosted_until','boosted_days','created_at'
+  ],
+  user_accounts: ['id','phone','name','password','ref_code','created_at'],
+  ad_submissions: [
+    'id','type','title','location','province','price','beds','baths',
+    'area','land','land_perches','img','amenities','deed','description','photos',
+    'submitter_name','submitter_phone','submitter_email','country',
+    'package_name','package_price','payment_ref','ref_code','status','created_at'
+  ]
+};
+
+// ── D1 helpers ────────────────────────────────────────────────────
+async function d1All(db, sql, params = []) {
+  const { results } = await db.prepare(sql).bind(...params).all();
+  return results || [];
+}
+
+async function d1Run(db, sql, params = []) {
+  await db.prepare(sql).bind(...params).run();
+}
+
+// Deserialize JSON fields stored as text
+function parseRow(table, row) {
+  if (!row) return row;
+  const jsonFields = ['amenities', 'photos'];
+  const out = { ...row };
+  for (const f of jsonFields) {
+    if (typeof out[f] === 'string') {
+      try { out[f] = JSON.parse(out[f]); } catch { out[f] = []; }
+    }
+  }
+  return out;
+}
+
+// ── Table CRUD handler ────────────────────────────────────────────
+async function handleTable(request, db, table) {
   const url = new URL(request.url);
   const method = request.method;
 
-  // OPTIONS preflight
   if (method === 'OPTIONS') return new Response(null, { headers: CORS });
 
-  const rows = await r2Get(bucket, `${table}.json`);
+  const cols = TABLES[table];
 
-  // GET — with optional query filters  e.g. ?phone=x&password=y&status=pending
+  // GET — with optional filter params
   if (method === 'GET') {
-    const params = Object.fromEntries(url.searchParams);
-    let result = rows;
-    for (const [k, v] of Object.entries(params)) {
-      result = result.filter(r => String(r[k]) === String(v));
+    // Only filter on known columns to avoid malformed queries
+    const params = [...url.searchParams.entries()].filter(([k]) => cols.includes(k));
+    let sql = `SELECT * FROM ${table}`;
+    const binds = [];
+    if (params.length) {
+      sql += ' WHERE ' + params.map(([k]) => `${k} = ?`).join(' AND ');
+      params.forEach(([, v]) => binds.push(v));
     }
-    // order by created_at desc by default
-    result = [...result].sort((a, b) =>
-      new Date(b.created_at || 0) - new Date(a.created_at || 0)
-    );
-    return json({ data: result, error: null });
+    sql += ' ORDER BY created_at DESC';
+    try {
+      const { results } = await db.prepare(sql).bind(...binds).all();
+      const rows = results || [];
+      return json({ data: rows.map(r => parseRow(table, r)), error: null });
+    } catch (e) {
+      return json({ data: [], error: { message: e.message } });
+    }
   }
 
   // POST — insert
   if (method === 'POST') {
-    const body = await request.json();
-    const newRow = { ...body, id: body.id || Date.now(), created_at: body.created_at || new Date().toISOString() };
-    rows.push(newRow);
-    await r2Put(bucket, `${table}.json`, rows);
-    return json({ data: newRow, error: null });
+    try {
+      const body = await request.json();
+      const id = body.id || Date.now();
+      const created_at = body.created_at || new Date().toISOString();
+      const row = { ...body, id, created_at };
+
+      // Only use known columns
+      const useCols = cols.filter(c => row[c] !== undefined);
+      const vals = useCols.map(c => {
+        const v = row[c];
+        return (Array.isArray(v) || typeof v === 'object' && v !== null)
+          ? JSON.stringify(v) : v;
+      });
+
+      const placeholders = useCols.map(() => '?').join(',');
+      await d1Run(db,
+        `INSERT OR REPLACE INTO ${table} (${useCols.join(',')}) VALUES (${placeholders})`,
+        vals
+      );
+      return json({ data: row, error: null });
+    } catch (e) {
+      return json({ data: null, error: { message: e.message } });
+    }
   }
 
-  // PUT — update by id (pass ?id=xxx)
+  // PUT — update by id
   if (method === 'PUT') {
     const id = url.searchParams.get('id');
     if (!id) return json({ data: null, error: { message: 'Missing id' } }, 400);
-    const patch = await request.json();
-    const updated = rows.map(r => String(r.id) === String(id) ? { ...r, ...patch } : r);
-    await r2Put(bucket, `${table}.json`, updated);
-    return json({ data: null, error: null });
+    try {
+      const patch = await request.json();
+      const useCols = cols.filter(c => c !== 'id' && patch[c] !== undefined);
+      if (!useCols.length) return json({ data: null, error: null });
+      const vals = useCols.map(c => {
+        const v = patch[c];
+        return (Array.isArray(v) || typeof v === 'object' && v !== null)
+          ? JSON.stringify(v) : v;
+      });
+      const setClause = useCols.map(c => `${c} = ?`).join(', ');
+      await d1Run(db, `UPDATE ${table} SET ${setClause} WHERE id = ?`, [...vals, id]);
+      return json({ data: null, error: null });
+    } catch (e) {
+      return json({ data: null, error: { message: e.message } });
+    }
   }
 
-  // DELETE — by id (?id=xxx)
+  // DELETE — by id
   if (method === 'DELETE') {
     const id = url.searchParams.get('id');
     if (!id) return json({ data: null, error: { message: 'Missing id' } }, 400);
-    const filtered = rows.filter(r => String(r.id) !== String(id));
-    await r2Put(bucket, `${table}.json`, filtered);
-    return json({ data: null, error: null });
+    try {
+      await d1Run(db, `DELETE FROM ${table} WHERE id = ?`, [id]);
+      return json({ data: null, error: null });
+    } catch (e) {
+      return json({ data: null, error: { message: e.message } });
+    }
   }
 
   return json({ error: { message: 'Method not allowed' } }, 405);
 }
 
-// ── Main fetch handler ───────────────────────────────────────────
+// ── Main ──────────────────────────────────────────────────────────
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
-    // API routes
     if (url.pathname.startsWith('/api/')) {
       const table = url.pathname.replace('/api/', '').replace(/\/$/, '');
-      const allowed = ['properties', 'user_accounts', 'ad_submissions'];
-      if (!allowed.includes(table)) {
-        return json({ error: { message: 'Unknown table' } }, 404);
-      }
-      return handleTable(request, env.VINO_BUCKET, table);
+      if (!TABLES[table]) return json({ error: { message: 'Unknown table' } }, 404);
+      return handleTable(request, env.DB, table);
     }
 
-    // Static assets
     try {
       return await getAssetFromKV(
         { request, waitUntil: ctx.waitUntil.bind(ctx) },
@@ -110,15 +167,13 @@ export default {
           ASSET_MANIFEST: assetManifest,
           mapRequestToAsset(req) {
             const u = new URL(req.url);
-            if (u.pathname === '/' || u.pathname === '') {
+            if (u.pathname === '/' || u.pathname === '')
               return new Request(`${u.origin}/index.html`, req);
-            }
             return req;
           },
         }
       );
-    } catch (e) {
-      // SPA fallback
+    } catch {
       try {
         const u = new URL(request.url);
         const r = await getAssetFromKV(
