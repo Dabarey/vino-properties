@@ -1,30 +1,8 @@
-name       = "vino-worker"
-main       = "worker.js"
+name = "vino-worker"
+main = "worker.js"
 compatibility_date = "2024-01-01"
 
-# ── D1 DATABASE ─────────────────────────────
 [[d1_databases]]
-binding      = "DB"           # matches env.DB in worker.js
+binding = "DB"
 database_name = "vino-db"
-database_id  = "3c851ce0-002c-4721-b81b-74d54ed7432d"   # ← paste from: wrangler d1 create vino-db
-
-# ── R2 BUCKET (static site: index.html) ─────
-# Uncomment if you serve index.html from R2 via a Worker route
-# [[r2_buckets]]
-# binding    = "ASSETS"
-# bucket_name = "vino-site"
-
-# ── ROUTES ──────────────────────────────────
-# Uncomment and set your domain to route API calls to the Worker
-# routes = [
-#   { pattern = "vino.properties/api/*", zone_name = "vino.properties" }
-# ]
-
-# ── ENVIRONMENT VARIABLES ───────────────────
-# Non-secret config goes here
-[vars]
-ENVIRONMENT = "production"
-
-# Secrets (set via CLI, never stored here):
-#   wrangler secret put ADMIN_PASSWORD
-#   wrangler secret put ADMIN_PHONE
+database_id = "3c851ce0-002c-4721-b81b-74d54ed7432d"
