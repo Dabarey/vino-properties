@@ -192,21 +192,22 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
-    if (url.pathname.startsWith('/api/')) {
-      const table = url.pathname.replace('/api/', '').replace(/\/$/, '');
-      if (!TABLES[table]) return json({ error: { message: 'Unknown table' } }, 404);
-      return handleTable(request, env.DB, table);
-    }
-
-    // Photo upload to R2
+    // Photo upload to R2 — must be before generic /api/ check
     if (url.pathname === '/api/upload') {
       return handleUpload(request, env.VINO_BUCKET);
     }
 
     // Serve R2 photos
     if (url.pathname.startsWith('/r2/')) {
-      const key = url.pathname.slice(4); // remove /r2/
+      const key = url.pathname.slice(4);
       return handleR2Photo(request, env.VINO_BUCKET, key);
+    }
+
+    // Table CRUD
+    if (url.pathname.startsWith('/api/')) {
+      const table = url.pathname.replace('/api/', '').replace(/\/$/, '');
+      if (!TABLES[table]) return json({ error: { message: 'Unknown table' } }, 404);
+      return handleTable(request, env.DB, table);
     }
 
     try {
