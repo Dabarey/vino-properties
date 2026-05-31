@@ -367,6 +367,7 @@ h1 em{color:var(--gold);font-style:italic;}
 }
 </style>
 <script src="https://js.stripe.com/v3/"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
 
@@ -1490,6 +1491,21 @@ h1 em{color:var(--gold);font-style:italic;}
           <div id="photoPreviewGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:8px;margin-top:10px;"></div>
           <div id="photoCount" style="font-size:12px;color:var(--muted);margin-top:4px;"></div>
         </div>
+        <!-- Google quick-login inside Post Ad -->
+        <div id="padGoogleSection" style="margin-bottom:16px;">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+            <div style="flex:1;height:1px;background:var(--border);"></div>
+            <span style="font-size:11px;color:var(--muted);font-weight:600;letter-spacing:1px;">QUICK LOGIN</span>
+            <div style="flex:1;height:1px;background:var(--border);"></div>
+          </div>
+          <div id="padGoogleBtn" style="display:flex;justify-content:center;margin-bottom:12px;"></div>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+            <div style="flex:1;height:1px;background:var(--border);"></div>
+            <span style="font-size:11px;color:var(--muted);font-weight:600;letter-spacing:1px;">OR FILL IN MANUALLY</span>
+            <div style="flex:1;height:1px;background:var(--border);"></div>
+          </div>
+        </div>
+
         <div id="padContactFields">
           <div class="af full"><label>Your Name *</label><input class="ai" id="pad_name" placeholder="Full name"></div>
           <div class="af"><label>Phone / WhatsApp *</label><input class="ai" id="pad_phone" placeholder="+94 77 000 0000"></div>
@@ -1913,6 +1929,92 @@ async function doUserLogin(){
   localStorage.setItem('vino_user',JSON.stringify(data));
   showUserDashboard();
 }
+
+// ── GOOGLE LOGIN ──
+function initGoogleLogin(){
+  if(typeof google==='undefined'||!google.accounts)return;
+  google.accounts.id.initialize({
+    client_id:'133721908068-j3n1uqktfsijk855gia0h8n68qj5lm6d.apps.googleusercontent.com',
+    callback:handleGoogleLogin,
+    auto_select:false,
+    cancel_on_tap_outside:true
+  });
+  renderGoogleBtn();
+}
+
+function renderGoogleBtn(){
+  const container=document.getElementById('googleSignInBtn');
+  if(!container||typeof google==='undefined')return;
+  container.innerHTML='';
+  google.accounts.id.renderButton(container,{
+    theme:'outline',size:'large',width:340,
+    text:'signin_with',shape:'rectangular',logo_alignment:'left'
+  });
+  // Also render in Post Ad if visible
+  const padBtn=document.getElementById('padGoogleBtn');
+  if(padBtn){
+    padBtn.innerHTML='';
+    google.accounts.id.renderButton(padBtn,{
+      theme:'outline',size:'large',width:320,
+      text:'signin_with',shape:'rectangular',logo_alignment:'left'
+    });
+  }
+}
+
+async function handleGoogleLogin(response){
+  try{
+    const payload=JSON.parse(atob(response.credential.split('.')[1]));
+    const name=payload.name||payload.email.split('@')[0];
+    const email=payload.email||'';
+    const gid=payload.sub||'';
+    let{data,error}=await db.from('user_accounts').select('*').eq('google_id',gid).single();
+    if(!data){
+      const res2=await db.from('user_accounts').select('*').eq('phone',email).single();
+      data=res2.data;
+    }
+    if(!data){
+      const refCode='G-'+gid.slice(-6).toUpperCase();
+      const pw=Math.random().toString(36).slice(2,8).toUpperCase();
+      const ins=await db.from('user_accounts').insert({
+        name,phone:email,password:pw,
+        ref_code:refCode,google_id:gid,
+        created_at:new Date().toISOString()
+      }).select().single();
+      data=ins.data;
+    }
+    if(data){
+      userAccount=data;
+      localStorage.setItem('vino_user',JSON.stringify(data));
+      // If Post Ad overlay is open, update it
+      const padOverlay=document.getElementById('postAdOverlay');
+      if(padOverlay&&padOverlay.classList.contains('open')){
+        document.getElementById('pad_name').value=data.name||'';
+        document.getElementById('pad_phone').value=data.phone||'';
+        document.getElementById('padPasswordFields').style.display='none';
+        document.getElementById('padLoggedInInfo').style.display='block';
+        document.getElementById('padLoggedName').textContent=data.name||data.phone;
+        document.getElementById('padGoogleSection').style.display='none';
+      } else {
+        document.getElementById('userLoginOverlay').style.display='flex';
+        showUserDashboard();
+      }
+      showToast('✅ Signed in as '+data.name+'!');
+    }
+  }catch(e){
+    showToast('Google login failed. Try phone login.');
+  }
+}
+
+// Re-render Google button each time overlay opens
+const _origOpen=openUserLogin;
+function openUserLogin(){
+  _origOpen();
+  setTimeout(()=>{if(typeof google!=='undefined'&&google.accounts)renderGoogleBtn();},250);
+}
+
+// Auto-init when GSI script loads
+document.addEventListener("DOMContentLoaded",function(){setTimeout(initGoogleLogin,500);});
+
 async function showUserDashboard(){
   document.getElementById('ulLoginForm').style.display='none';
   document.getElementById('ulDashboard').style.display='block';
@@ -2811,10 +2913,13 @@ function openPostAd(){
     document.getElementById('padPasswordFields').style.display='none';
     document.getElementById('padLoggedInInfo').style.display='block';
     document.getElementById('padLoggedName').textContent=userAccount.name||userAccount.phone;
+    document.getElementById('padGoogleSection').style.display='none';
   } else {
     ['pad_name','pad_phone'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
     document.getElementById('padPasswordFields').style.display='block';
     document.getElementById('padLoggedInInfo').style.display='none';
+    document.getElementById('padGoogleSection').style.display='block';
+    setTimeout(()=>{if(typeof google!=='undefined'&&google.accounts)renderGoogleBtn();},300);
   }
   padShow(1);
   openOv('postAdOverlay');
@@ -3462,6 +3567,16 @@ setTimeout(()=>{
     <div style="font-size:13px;color:var(--muted);margin-bottom:24px;">Login to check your listing status</div>
 
     <div id="ulLoginForm">
+      <!-- Google Sign-In -->
+      <div id="googleSignInBtn" style="display:flex;justify-content:center;margin-bottom:16px;"></div>
+
+      <!-- Divider -->
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+        <div style="flex:1;height:1px;background:var(--border);"></div>
+        <span style="font-size:11px;color:var(--muted);font-weight:600;letter-spacing:1px;">OR</span>
+        <div style="flex:1;height:1px;background:var(--border);"></div>
+      </div>
+
       <div style="margin-bottom:14px;">
         <label style="font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);font-weight:600;">Phone Number</label>
         <input id="ulPhone" type="tel" placeholder="+94 77 123 4567" style="width:100%;margin-top:5px;padding:12px;border:1px solid var(--border);border-radius:10px;font-size:14px;font-family:'DM Sans',sans-serif;" onkeydown="if(event.key==='Enter')document.getElementById('ulPw').focus()">
