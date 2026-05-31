@@ -1,11 +1,12 @@
 name = "vino"
 main = "worker.js"
 compatibility_date = "2024-01-01"
+account_id = "c292b7a78796881507a0b4274c03249d"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "vino_realty"
-database_id = "PASTE_YOUR_D1_DATABASE_ID_HERE"
+database_id = "1cdd665a-adfd-4ccf-a1c8-a2c2d345f407"
 
 [[r2_buckets]]
 binding = "PHOTOS"
