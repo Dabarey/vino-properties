@@ -3125,6 +3125,7 @@ async function submitAd(){
   const btn=document.querySelector('#padStep3 .pad-next');
   btn.textContent='Submitting…';btn.disabled=true;
   try{
+    // Upload photos to R2 first
     if(uploadedPhotos.length){
       const urls=[];
       for(const p of uploadedPhotos){
@@ -3142,19 +3143,21 @@ async function submitAd(){
     btn.textContent='✅ Submit Ad for Approval';btn.disabled=false;
     if(!userAccount){
       const chosenPw=document.getElementById('pad_password').value||null;
-      const userPw=await createUserAccount(row.submitter_phone, row.submitter_name, row.ref_code, chosenPw);
+      const userPw=await createUserAccount(row.submitter_phone,row.submitter_name,row.ref_code,chosenPw);
       try{
         const newAcc=await apiFetch('/api/users/login',{method:'POST',body:JSON.stringify({phone:row.submitter_phone,password:userPw})});
         userAccount=newAcc;lsSet('vino_user',newAcc);
       }catch{}
-    if(userPw){
       const cb=document.getElementById('ulCredBox');
       const cp=document.getElementById('ulCredPhone');
       const cw=document.getElementById('ulCredPw');
       if(cp)cp.textContent=row.submitter_phone;
-      if(cw)cw.textContent=userPw;
+      if(cw)cw.textContent=userPw||'(your chosen password)';
       if(cb)cb.style.display='block';
     }
+  }catch(e){
+    btn.textContent='✅ Submit Ad for Approval';btn.disabled=false;
+    alert('Error submitting: '+e.message);return;
   }
   padShow(4);
   updatePendingCount();
@@ -3334,28 +3337,20 @@ function checkSharedLink(){
 
 // ── BOOT ──
 (async()=>{
-  // Init country
   currentCountry='LK';
   if(document.getElementById('heroCountry'))document.getElementById('heroCountry').value='LK';
   if(document.getElementById('sbCountry'))document.getElementById('sbCountry').value='LK';
   const curr=document.getElementById('statCurrency');if(curr)curr.textContent='LKR';
-  // Safety timeout — force remove loading screen after 5 seconds
-  const safetyTimer = setTimeout(()=>{
-    document.getElementById('loadingScreen').classList.remove('show');
-    if(!props.length) props=[...DEF_PROPS];
-    applyFilters();
-  }, 5000);
 
-  try{
-    await loadProps();
-  } catch(e){
-    props=[...DEF_PROPS];
-  }
-  clearTimeout(safetyTimer);
+  // Show page immediately with default properties
+  props=[...DEF_PROPS];
   document.getElementById('loadingScreen').classList.remove('show');
   applyFilters();
-  loadPending();
   checkSharedLink();
+
+  // Load real data from API in background (non-blocking)
+  loadProps().then(()=>{ applyFilters(); }).catch(()=>{});
+  loadPending().catch(()=>{});
 })();
 
 // ── SPARKLE EFFECT ──
