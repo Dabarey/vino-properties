@@ -1671,6 +1671,21 @@ const IMGS={house:['img-house1','img-house2','img-house3'],land:['img-land1','im
 
 function lsGet(k,def){try{const d=localStorage.getItem(k);return d?JSON.parse(d):def;}catch{return def;}}
 function lsSet(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch{}}
+const API='https://vino.daba-rey3.workers.dev';
+const ADMIN_KEY=lsGet('vino_admin_key','');
+async function apiFetch(path,opts={}){
+  const headers={'Content-Type':'application/json',...(opts.headers||{})};
+  if(ADMIN_KEY)headers['X-Admin-Key']=ADMIN_KEY;
+  const res=await fetch(API+path,{...opts,headers});
+  if(!res.ok){const t=await res.text();throw new Error(t);}
+  return res.json();
+}
+async function apiUploadPhoto(file){
+  const fd=new FormData();fd.append('file',file,file.name);
+  const res=await fetch(API+'/api/upload',{method:'POST',body:fd});
+  if(!res.ok)throw new Error('Upload failed');
+  return (await res.json()).url;
+}
 
 let props=[];
 let settings=lsGet('estate_settings',{...DEF_SET});
@@ -1855,12 +1870,7 @@ async function boostProp(id){
   const d=parseInt(days);
   if(![7,14,30].includes(d)){alert('Please enter 7, 14, or 30 days.');return;}
   const until=new Date();until.setDate(until.getDate()+d);
-  const{error}=await db.from('properties').update({boosted:true,boosted_until:until.toISOString(),boosted_days:d}).eq('id',id);
-  if(error){
-    // columns may not exist yet — show SQL help
-    alert('⚠️ Please run this SQL in Supabase first:\n\nalter table properties add column if not exists boosted boolean default false;\nalter table properties add column if not exists boosted_until timestamptz;\nalter table properties add column if not exists boosted_days int default 0;');
-    return;
-  }
+  try{await apiFetch('/api/properties/'+id+'/boost',{method:'PUT',body:JSON.stringify({days:d})});}catch(e){alert('Boost error: '+e.message);return;}
   alert(`✅ "${p.title}" boosted to top for ${d} days!`);
   await loadProps();
   applyFilters();
@@ -1870,27 +1880,19 @@ async function boostProp(id){
 // ── USER ACCOUNT (auto-create on ad submit) ──
 async function createUserAccount(phone, name, refCode, customPw){
   const pw = customPw || (Math.random().toString(36).slice(2,5).toUpperCase() + Math.floor(100+Math.random()*900));
-  // Check if account already exists for this phone
-  const{data:existing}=await db.from('user_accounts').select('id').eq('phone',phone).single();
-  if(existing){
-    // Update password
-    await db.from('user_accounts').update({password:pw,ref_code:refCode}).eq('phone',phone);
-  } else {
-    const{error}=await db.from('user_accounts').insert({phone,name,password:pw,ref_code:refCode,created_at:new Date().toISOString()});
-    if(error && !error.message.includes('duplicate')){
-      console.warn('Account creation skipped:',error.message);
-      return null;
-    }
-  }
-  return pw;
+  try{
+    const data = await apiFetch('/api/users/register',{method:'POST',body:JSON.stringify({phone,name,password:pw,ref_code:refCode})});
+    return pw;
+  }catch(e){ return pw; }
 }
 
 // ── USER LOGIN PORTAL ──
 let userAccount=null;
+try{const _saved=lsGet('vino_user',null);if(_saved&&_saved.id)userAccount=_saved;}catch{}
 
 function openUserLogin(){
   if(!userAccount){
-    try{const saved=localStorage.getItem('vino_user');if(saved)userAccount=JSON.parse(saved);}catch{}
+    try{const saved=lsGet('vino_user',null);if(saved)userAccount=saved;}catch{}
   }
   document.getElementById('userLoginOverlay').style.display='flex';
   if(userAccount){showUserDashboard();return;}
@@ -1914,14 +1916,10 @@ async function doUserLogin(){
   const phone=document.getElementById('ulPhone').value.trim();
   const pw=document.getElementById('ulPw').value.trim();
   if(!phone||!pw){alert('Enter phone and password.');return;}
-  const{data,error}=await db.from('user_accounts').select('*').eq('phone',phone).eq('password',pw).single();
-  if(error||!data){
-    document.getElementById('ulError').style.display='block';return;
-  }
-  userAccount=data;
-  // Stay logged in — save to localStorage
-  localStorage.setItem('vino_user',JSON.stringify(data));
-  showUserDashboard();
+  try{
+    const data=await apiFetch('/api/users/login',{method:'POST',body:JSON.stringify({phone,password:pw})});
+    userAccount=data;lsSet('vino_user',data);showUserDashboard();
+  }catch(e){document.getElementById('ulError').style.display='block';}
 }
 
 // ── GOOGLE LOGIN ──
@@ -1961,42 +1959,22 @@ async function handleGoogleLogin(response){
     const name=payload.name||payload.email.split('@')[0];
     const email=payload.email||'';
     const gid=payload.sub||'';
-    let{data,error}=await db.from('user_accounts').select('*').eq('google_id',gid).single();
-    if(!data){
-      const res2=await db.from('user_accounts').select('*').eq('phone',email).single();
-      data=res2.data;
+    const data=await apiFetch('/api/users/google',{method:'POST',body:JSON.stringify({google_id:gid,name,email})});
+    userAccount=data;lsSet('vino_user',data);
+    const padOverlay=document.getElementById('postAdOverlay');
+    if(padOverlay&&padOverlay.classList.contains('open')){
+      document.getElementById('pad_name').value=data.name||'';
+      document.getElementById('pad_phone').value=data.phone||'';
+      document.getElementById('padPasswordFields').style.display='none';
+      document.getElementById('padLoggedInInfo').style.display='block';
+      document.getElementById('padLoggedName').textContent=data.name||data.phone;
+      document.getElementById('padGoogleSection').style.display='none';
+    } else {
+      document.getElementById('userLoginOverlay').style.display='flex';
+      showUserDashboard();
     }
-    if(!data){
-      const refCode='G-'+gid.slice(-6).toUpperCase();
-      const pw=Math.random().toString(36).slice(2,8).toUpperCase();
-      const ins=await db.from('user_accounts').insert({
-        name,phone:email,password:pw,
-        ref_code:refCode,google_id:gid,
-        created_at:new Date().toISOString()
-      }).select().single();
-      data=ins.data;
-    }
-    if(data){
-      userAccount=data;
-      localStorage.setItem('vino_user',JSON.stringify(data));
-      // If Post Ad overlay is open, update it
-      const padOverlay=document.getElementById('postAdOverlay');
-      if(padOverlay&&padOverlay.classList.contains('open')){
-        document.getElementById('pad_name').value=data.name||'';
-        document.getElementById('pad_phone').value=data.phone||'';
-        document.getElementById('padPasswordFields').style.display='none';
-        document.getElementById('padLoggedInInfo').style.display='block';
-        document.getElementById('padLoggedName').textContent=data.name||data.phone;
-        document.getElementById('padGoogleSection').style.display='none';
-      } else {
-        document.getElementById('userLoginOverlay').style.display='flex';
-        showUserDashboard();
-      }
-      showToast('✅ Signed in as '+data.name+'!');
-    }
-  }catch(e){
-    showToast('Google login failed. Try phone login.');
-  }
+    showToast('✅ Signed in as '+data.name+'!');
+  }catch(e){showToast('Google login failed. Try phone login.');}
 }
 
 // Auto-init when GSI script loads
@@ -2006,8 +1984,8 @@ async function showUserDashboard(){
   document.getElementById('ulLoginForm').style.display='none';
   document.getElementById('ulDashboard').style.display='block';
   document.getElementById('ulWelcome').textContent='Welcome, '+userAccount.name+'!';
-  // load their submissions
-  const{data}=await db.from('ad_submissions').select('*').eq('ref_code',userAccount.ref_code).order('created_at',{ascending:false});
+  let data=[];
+  try{data=await apiFetch('/api/submissions/user/'+userAccount.ref_code);}catch{}
   const list=document.getElementById('ulAdList');
   if(!data||data.length===0){list.innerHTML='<p style="color:var(--muted);font-size:13px;text-align:center;padding:16px;">No ads submitted yet.</p>';return;}
   list.innerHTML=data.map(ad=>{
@@ -2082,18 +2060,14 @@ function initBoostPaypal(type){
         container.style.display='none';
         document.getElementById('boostPaypalSuccess').style.display='block';
         // Apply boost/repost to property
-        const{data:sub}=await db.from('ad_submissions').select('*').eq('ref_code',boostRefCode).single();
-        if(sub){
-          const{data:propData}=await db.from('properties').select('*').eq('title',sub.title).eq('location',sub.location).single();
-          if(propData){
-            if(type==='repost'){
-              await db.from('properties').update({created_at:new Date().toISOString()}).eq('id',propData.id);
-            } else {
-              const until=new Date();until.setDate(until.getDate()+boostDays);
-              await db.from('properties').update({boosted:true,boosted_until:until.toISOString(),boosted_days:boostDays}).eq('id',propData.id);
-            }
-            await loadProps();applyFilters();
+        const liveProp=props.find(p=>p.ref_code===boostRefCode||String(p.id)===String(boostRefCode));
+        if(liveProp){
+          if(type==='repost'){
+            await apiFetch('/api/properties/'+liveProp.id,{method:'PUT',body:JSON.stringify({...liveProp,created_at:new Date().toISOString()})});
+          } else {
+            await apiFetch('/api/properties/'+liveProp.id+'/boost',{method:'PUT',body:JSON.stringify({days:boostDays})});
           }
+          await loadProps();applyFilters();
         }
       });
     },
@@ -2630,10 +2604,11 @@ async function delProp(id,e){
   if(e)e.stopPropagation();
   const p=props.find(x=>x.id===id);if(!p)return;
   if(!confirm(`Delete "${p.title}"?`))return;
-  const{error}=await db.from('properties').delete().eq('id',id);
-  if(error){alert('Error deleting: '+error.message);return;}
-  props=props.filter(x=>x.id!==id);
-  renderAdminList();applyFilters();
+  try{
+    await apiFetch('/api/properties/'+id,{method:'DELETE'});
+    props=props.filter(x=>x.id!==id);
+    renderAdminList();applyFilters();
+  }catch(e){alert('Error deleting: '+e.message);}
 }
 async function saveProp(){
   const title=document.getElementById('af_title').value.trim();
@@ -2678,28 +2653,24 @@ async function saveProp(){
 
   let error;
   try {
+    // Upload any new photos to R2
+    if(adminPhotos.length){
+      const urls=[];
+      for(const p of adminPhotos){
+        if(p.data&&p.data.startsWith('data:')){
+          const res=await fetch(p.data);
+          const blob=await res.blob();
+          const file=new File([blob],p.name||'photo.jpg',{type:blob.type});
+          const url=await apiUploadPhoto(file);
+          urls.push(url);
+        } else if(p.url){ urls.push(p.url); }
+      }
+      if(urls.length) row.photos=urls;
+    }
     if(editId){
-      ({error}=await db.from('properties').update(row).eq('id',editId));
+      await apiFetch('/api/properties/'+editId,{method:'PUT',body:JSON.stringify(row)});
     } else {
-      ({error}=await db.from('properties').insert(row));
-    }
-    // Retry stripping unknown columns one by one if error
-    if(error && error.message){
-      let cleanRow={...row};
-      if(error.message.includes('link')){delete cleanRow.link;}
-      if(error.message.includes('photos')){delete cleanRow.photos;}
-      if(error.message.includes('boosted')){delete cleanRow.boosted;delete cleanRow.boosted_until;delete cleanRow.boosted_days;}
-      if(editId){({error}=await db.from('properties').update(cleanRow).eq('id',editId));}
-      else{({error}=await db.from('properties').insert(cleanRow));}
-    }
-    // Second retry — strip all optional columns
-    if(error && error.message){
-      const safeRow={type:row.type,title:row.title,location:row.location,province:row.province,
-        price:row.price,beds:row.beds,baths:row.baths,area:row.area,land:row.land,
-        land_perches:row.land_perches,img:row.img,amenities:row.amenities,
-        deed:row.deed,badge:row.badge,badge_key:row.badge_key,description:row.description};
-      if(editId){({error}=await db.from('properties').update(safeRow).eq('id',editId));}
-      else{({error}=await db.from('properties').insert(safeRow));}
+      await apiFetch('/api/properties',{method:'POST',body:JSON.stringify(row)});
     }
   } catch(e){
     error={message:e.message||'Unknown error'};
@@ -2880,7 +2851,7 @@ function autoSetProvince(){
 function openPostAd(){
   // Restore session if not loaded
   if(!userAccount){
-    try{const s=localStorage.getItem('vino_user');if(s)userAccount=JSON.parse(s);}catch{}
+    try{const s=lsGet('vino_user',null);if(s&&s.id)userAccount=s;}catch{}
   }
   selPkg=null;
   document.querySelectorAll('.pkg-card').forEach(c=>c.classList.remove('selected'));
@@ -3150,16 +3121,37 @@ async function submitAd(){
   };
   const btn=document.querySelector('#padStep3 .pad-next');
   btn.textContent='Submitting…';btn.disabled=true;
-  const{error}=await db.from('ad_submissions').insert(row);
-  btn.textContent='✅ Submit Ad for Approval';btn.disabled=false;
-  if(error){alert('Error: '+error.message);return;}
-  // Auto-create user account
-  const chosenPw=userAccount?null:(document.getElementById('pad_password').value||null);
-  const userPw=userAccount?null:await createUserAccount(row.submitter_phone, row.submitter_name, row.ref_code, chosenPw);
-  if(userPw){
-    document.getElementById('ulCredPhone').textContent=row.submitter_phone;
-    document.getElementById('ulCredPw').textContent=userPw;
-    document.getElementById('ulCredBox').style.display='block';
+  try{
+    if(uploadedPhotos.length){
+      const urls=[];
+      for(const p of uploadedPhotos){
+        if(p.data&&p.data.startsWith('data:')){
+          const res2=await fetch(p.data);
+          const blob=await res2.blob();
+          const file=new File([blob],p.name||'photo.jpg',{type:blob.type});
+          const url=await apiUploadPhoto(file);
+          urls.push(url);
+        }
+      }
+      if(urls.length)row.photos=urls;
+    }
+    await apiFetch('/api/submissions',{method:'POST',body:JSON.stringify(row)});
+    btn.textContent='✅ Submit Ad for Approval';btn.disabled=false;
+    if(!userAccount){
+      const chosenPw=document.getElementById('pad_password').value||null;
+      const userPw=await createUserAccount(row.submitter_phone, row.submitter_name, row.ref_code, chosenPw);
+      try{
+        const newAcc=await apiFetch('/api/users/login',{method:'POST',body:JSON.stringify({phone:row.submitter_phone,password:userPw})});
+        userAccount=newAcc;lsSet('vino_user',newAcc);
+      }catch{}
+    if(userPw){
+      const cb=document.getElementById('ulCredBox');
+      const cp=document.getElementById('ulCredPhone');
+      const cw=document.getElementById('ulCredPw');
+      if(cp)cp.textContent=row.submitter_phone;
+      if(cw)cw.textContent=userPw;
+      if(cb)cb.style.display='block';
+    }
   }
   padShow(4);
   updatePendingCount();
@@ -3169,9 +3161,9 @@ async function submitAd(){
 let pendingAds=[];
 
 async function loadPending(){
-  const{data,error}=await db.from('ad_submissions').select('*').eq('status','pending').order('created_at',{ascending:false});
-  if(error){return;}
-  pendingAds=data||[];
+  try{
+    pendingAds=await apiFetch('/api/submissions?status=pending');
+  }catch{pendingAds=[];}
   updatePendingCount();
 }
 
@@ -3220,14 +3212,9 @@ async function approveAd(id){
   if(!confirm(`Approve and publish "${sub.title}"?`))return;
   const pkgKey=sub.package_name?.toLowerCase();
   const pkgInfo=PKGS[pkgKey]||PKGS.basic;
-  const{error:insErr}=await db.from('properties').insert({
-    type:sub.type,title:sub.title,location:sub.location,province:sub.province,
-    price:sub.price,beds:sub.beds,baths:sub.baths,area:sub.area,land:sub.land,
-    land_perches:sub.land_perches,img:sub.img||'img-custom',amenities:sub.amenities||[],
-    deed:sub.deed,badge:pkgInfo.badge,badge_key:pkgInfo.bk,description:sub.description,photos:sub.photos||null
-  });
-  if(insErr){alert('Error publishing: '+insErr.message);return;}
-  await db.from('ad_submissions').update({status:'approved'}).eq('id',id);
+  try{
+    await apiFetch('/api/submissions/'+id+'/approve',{method:'PUT',body:JSON.stringify({badge:pkgInfo.badge,badge_key:pkgInfo.bk})});
+  }catch(e){alert('Error approving: '+e.message);return;}
   pendingAds=pendingAds.filter(x=>String(x.id)!==String(id));
   renderPending();updatePendingCount();
   await loadProps();applyFilters();
@@ -3237,7 +3224,7 @@ async function approveAd(id){
 async function rejectAd(id){
   const sub=pendingAds.find(x=>String(x.id)===String(id));if(!sub)return;
   if(!confirm(`Reject "${sub.title}"? This will delete the submission.`))return;
-  await db.from('ad_submissions').update({status:'rejected'}).eq('id',id);
+  try{await apiFetch('/api/submissions/'+id+'/reject',{method:'PUT'});}catch(e){alert('Error: '+e.message);return;}
   pendingAds=pendingAds.filter(x=>String(x.id)!==String(id));
   renderPending();updatePendingCount();
 }
@@ -3261,12 +3248,12 @@ function rowToP(r){
   };
 }
 async function loadProps(){
-  const{data,error}=await db.from('properties').select('*').order('created_at',{ascending:false});
-  if(error){
+  try{
+    const data=await apiFetch('/api/properties');
+    props=data.length>0?data.map(rowToP):[...DEF_PROPS];
+  }catch(e){
     props=[...DEF_PROPS];
-    return false;
   }
-  props=data.length>0?data.map(rowToP):[...DEF_PROPS];
   return true;
 }
 
