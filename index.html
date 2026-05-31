@@ -1889,23 +1889,17 @@ async function createUserAccount(phone, name, refCode, customPw){
 let userAccount=null;
 
 function openUserLogin(){
-  // Try restore from localStorage first
   if(!userAccount){
-    try{
-      const saved=localStorage.getItem('vino_user');
-      if(saved) userAccount=JSON.parse(saved);
-    }catch{}
+    try{const saved=localStorage.getItem('vino_user');if(saved)userAccount=JSON.parse(saved);}catch{}
   }
   document.getElementById('userLoginOverlay').style.display='flex';
-  if(userAccount){
-    // Already logged in — go straight to dashboard
-    showUserDashboard();return;
-  }
+  if(userAccount){showUserDashboard();return;}
   document.getElementById('ulPhone').value='';
   document.getElementById('ulPw').value='';
   document.getElementById('ulError').style.display='none';
   document.getElementById('ulLoginForm').style.display='block';
   document.getElementById('ulDashboard').style.display='none';
+  setTimeout(()=>{if(typeof google!=='undefined'&&google.accounts)renderGoogleBtn();},250);
 }
 function closeUserLogin(){document.getElementById('userLoginOverlay').style.display='none';}
 function userLogout(){
@@ -2003,13 +1997,6 @@ async function handleGoogleLogin(response){
   }catch(e){
     showToast('Google login failed. Try phone login.');
   }
-}
-
-// Re-render Google button each time overlay opens
-const _origOpen=openUserLogin;
-function openUserLogin(){
-  _origOpen();
-  setTimeout(()=>{if(typeof google!=='undefined'&&google.accounts)renderGoogleBtn();},250);
 }
 
 // Auto-init when GSI script loads
