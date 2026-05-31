@@ -56,6 +56,45 @@ function parseRow(table, row) {
   return out;
 }
 
+// ── Photo upload to R2 ───────────────────────────────────────────
+async function handleUpload(request, bucket) {
+  if (request.method === 'OPTIONS') return new Response(null, { headers: CORS });
+  if (request.method !== 'POST') return json({ error: { message: 'Method not allowed' } }, 405);
+
+  try {
+    const formData = await request.formData();
+    const urls = [];
+
+    for (const [, file] of formData.entries()) {
+      if (!file || typeof file === 'string') continue;
+      const ext = (file.name || 'photo').split('.').pop().toLowerCase() || 'jpg';
+      const key = `photos/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+      await bucket.put(key, file.stream(), {
+        httpMetadata: { contentType: file.type || 'image/jpeg' }
+      });
+      urls.push(`/r2/${key}`);
+    }
+
+    return json({ urls, error: null });
+  } catch (e) {
+    return json({ urls: [], error: { message: e.message } });
+  }
+}
+
+// ── Serve R2 photos ───────────────────────────────────────────────
+async function handleR2Photo(request, bucket, key) {
+  if (request.method === 'OPTIONS') return new Response(null, { headers: CORS });
+  const obj = await bucket.get(key);
+  if (!obj) return new Response('Not found', { status: 404 });
+  return new Response(obj.body, {
+    headers: {
+      'Content-Type': obj.httpMetadata?.contentType || 'image/jpeg',
+      'Cache-Control': 'public, max-age=31536000',
+      ...CORS
+    }
+  });
+}
+
 // ── Table CRUD handler ────────────────────────────────────────────
 async function handleTable(request, db, table) {
   const url = new URL(request.url);
@@ -157,6 +196,17 @@ export default {
       const table = url.pathname.replace('/api/', '').replace(/\/$/, '');
       if (!TABLES[table]) return json({ error: { message: 'Unknown table' } }, 404);
       return handleTable(request, env.DB, table);
+    }
+
+    // Photo upload to R2
+    if (url.pathname === '/api/upload') {
+      return handleUpload(request, env.VINO_BUCKET);
+    }
+
+    // Serve R2 photos
+    if (url.pathname.startsWith('/r2/')) {
+      const key = url.pathname.slice(4); // remove /r2/
+      return handleR2Photo(request, env.VINO_BUCKET, key);
     }
 
     try {
