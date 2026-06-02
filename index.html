@@ -36,21 +36,41 @@ class CFTable {
     this._orderAsc = true;
     this._selectCols = '*';
     this._isSingle = false;
+    this._method = 'GET';
+    this._body = undefined;
   }
-  select(cols = '*') { this._selectCols = cols; return this; }
-  eq(col, val) { this._filters[col] = val; return this; }
-  order(col, { ascending = true } = {}) { this._orderCol = col; this._orderAsc = ascending; return this; }
-  single() { this._isSingle = true; return this; }
 
-  async _fetch(method, body) {
+  select(cols = '*') { this._selectCols = cols; return this; }
+  single()           { this._isSingle = true; return this; }
+  order(col, { ascending = true } = {}) { this._orderCol = col; this._orderAsc = ascending; return this; }
+
+  eq(col, val) {
+    this._filters[col] = val;
+    return this;
+  }
+
+  // Lazy: store intent, chain continues, .then() fires the actual fetch
+  insert(row)  { this._method = 'POST';   this._body = row;         this._updateData = null;  return this; }
+  update(data) { this._method = 'PATCH';  this._updateData = data;  this._body = null;         return this; }
+  delete()     { this._method = 'DELETE'; this._updateData = null;  this._body = null;         return this; }
+
+  // Called when the expression is awaited
+  then(resolve, reject) {
+    // Rebuild body with latest filters (set via .eq() after update()/delete())
+    if (this._method === 'PATCH')  this._body = { _filters: { ...this._filters }, _data: this._updateData };
+    if (this._method === 'DELETE') this._body = { _filters: { ...this._filters } };
+    return this._exec().then(resolve, reject);
+  }
+
+  async _exec() {
     const url = new URL(`${WORKER_URL}/api/${this._table}`);
-    if (method === 'GET') {
+    if (this._method === 'GET') {
       Object.entries(this._filters).forEach(([k, v]) => url.searchParams.set(k, v));
       if (this._orderCol) { url.searchParams.set('_order', this._orderCol); url.searchParams.set('_asc', this._orderAsc); }
-      if (this._isSingle) url.searchParams.set('_single', '1');
+      if (this._isSingle)  url.searchParams.set('_single', '1');
     }
-    const opts = { method, headers: { 'Content-Type': 'application/json' } };
-    if (body !== undefined) opts.body = JSON.stringify(body);
+    const opts = { method: this._method, headers: { 'Content-Type': 'application/json' } };
+    if (this._body !== undefined) opts.body = JSON.stringify(this._body);
     try {
       const res = await fetch(url, opts);
       const json = await res.json();
@@ -58,12 +78,6 @@ class CFTable {
       return { data: json.data ?? json, error: null };
     } catch (e) { return { data: null, error: { message: e.message } }; }
   }
-
-  async insert(row) { return this._fetch('POST', row); }
-  async update(row) { return this._fetch('PATCH', { _filters: this._filters, _data: row }); }
-  async delete() { return this._fetch('DELETE', { _filters: this._filters }); }
-  // select() returns self for chaining; actual fetch triggered on await
-  then(resolve, reject) { return this._fetch('GET').then(resolve, reject); }
 }
 
 // R2 photo upload helper — uploads a base64 dataURL, returns the public URL

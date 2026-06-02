@@ -120,8 +120,8 @@ export default {
         const placeholders = cols.map(() => '?').join(', ');
         const vals = cols.map(c => row[c]);
         const query = `INSERT INTO ${table} (${cols.join(', ')}) VALUES (${placeholders})`;
-        await env.DB.prepare(query).bind(...vals).run();
-        return json({ data: row }, corsHeaders);
+        const result = await env.DB.prepare(query).bind(...vals).run();
+        return json({ data: { ...row, id: result.meta?.last_row_id } }, corsHeaders);
       }
 
       // ── PATCH (UPDATE) ───────────────────────────────────────────
@@ -163,12 +163,14 @@ export default {
 
 // ── Helpers ──────────────────────────────────────────────────────
 
-/** Serialize arrays/objects to JSON strings for D1 storage */
+/** Serialize arrays/objects to JSON strings for D1 storage; pass null/numbers/strings through */
 function flattenForD1(obj) {
   const out = {};
   for (const [k, v] of Object.entries(obj)) {
     if (v === undefined) continue;
-    if (Array.isArray(v) || (v !== null && typeof v === 'object')) {
+    if (v === null) {
+      out[k] = null;
+    } else if (Array.isArray(v) || (typeof v === 'object')) {
       out[k] = JSON.stringify(v);
     } else {
       out[k] = v;
