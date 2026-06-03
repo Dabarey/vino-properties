@@ -1,11 +1,11 @@
 name = "vino"
-main = "worker/index.js"
+main = "index.js"
 compatibility_date = "2024-01-01"
 compatibility_flags = ["nodejs_compat"]
 
 # ── Static site assets (index.html + manifest.json etc.) ──
 [site]
-bucket = "./public"
+bucket = "./"
 
 # ── D1 Database ──
 [[d1_databases]]
