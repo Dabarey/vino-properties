@@ -34,10 +34,10 @@ export default {
     const method = request.method;
 
     // ── Static frontend ──
-    if (path === '/' || path === '/index.html') {
-      const asset = await env.ASSETS.fetch(request);
-      return asset;
-    }
+    if (path === "/" || path === "/index.html") {
+  const asset = await env.__STATIC_CONTENT.get("index.html", { type: "text" });
+  return new Response(asset, { headers: { "Content-Type": "text/html" } });
+}
 
     // ── API routes ──
     try {
