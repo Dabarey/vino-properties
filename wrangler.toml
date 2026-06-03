@@ -3,22 +3,14 @@ main = "index.js"
 compatibility_date = "2024-01-01"
 compatibility_flags = ["nodejs_compat"]
 
-# ── Static site assets (index.html + manifest.json etc.) ──
 [site]
 bucket = "./"
 
-# ── D1 Database ──
 [[d1_databases]]
 binding = "DB"
 database_name = "vino-db"
 database_id = "8294a849-6f93-4143-acec-31aa645a1b20"
 
-# ── R2 Photo Storage ──
 [[r2_buckets]]
 binding = "PHOTOS"
 bucket_name = "vino-photos"
-
-# ── Production environment ──
-[env.production]
-name = "vino"
-routes = [{ pattern = "vino.properties/*", zone_name = "vino.properties" }]
