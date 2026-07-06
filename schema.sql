@@ -82,6 +82,25 @@ CREATE TABLE IF NOT EXISTS ad_submissions (
 CREATE INDEX IF NOT EXISTS idx_subs_status   ON ad_submissions(status);
 CREATE INDEX IF NOT EXISTS idx_subs_ref_code ON ad_submissions(ref_code);
 
+CREATE TABLE IF NOT EXISTS wanted_ads (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  type             TEXT    NOT NULL DEFAULT 'house',
+  location         TEXT    NOT NULL DEFAULT '',
+  province         TEXT    NOT NULL DEFAULT '',
+  country          TEXT    NOT NULL DEFAULT 'LK',
+  budget_min       REAL    NOT NULL DEFAULT 0,
+  budget_max       REAL    NOT NULL DEFAULT 0,
+  beds             INTEGER NOT NULL DEFAULT 0,
+  description      TEXT    NOT NULL DEFAULT '',
+  buyer_name       TEXT    NOT NULL DEFAULT '',
+  buyer_phone      TEXT    NOT NULL DEFAULT '',
+  created_at       TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_wanted_country  ON wanted_ads(country);
+CREATE INDEX IF NOT EXISTS idx_wanted_type     ON wanted_ads(type);
+CREATE INDEX IF NOT EXISTS idx_wanted_created  ON wanted_ads(created_at DESC);
+
 CREATE TABLE IF NOT EXISTS settings (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL DEFAULT '{}'
