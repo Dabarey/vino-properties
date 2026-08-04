@@ -1199,8 +1199,14 @@ h1 em{color:var(--gold);font-style:italic;}
           <div id="adminPhotoCount" style="font-size:12px;color:var(--muted);margin-top:4px;"></div>
         </div>
       </div>
+      <div style="border:2px dashed rgba(201,168,76,0.5);border-radius:12px;padding:16px;background:rgba(201,168,76,0.05);margin-bottom:16px;">
+        <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#C9A84C;font-weight:700;margin-bottom:6px;">&#128274; Admin Notes (private)</div>
+        <div style="font-size:12px;color:#888;margin-bottom:8px;">Only visible to you. Owner phone, contact info, any private notes.</div>
+        <textarea id="af_phone" rows="3" placeholder="e.g. Owner: +94 77 123 4567, contact via WhatsApp..." style="width:100%;padding:12px;border:1.5px solid rgba(201,168,76,0.4);border-radius:10px;font-size:14px;font-family:'DM Sans',sans-serif;resize:vertical;box-sizing:border-box;background:#fff;"></textarea>
+      </div>
       <div class="a-actions">
         <button class="a-cancel" onclick="aTab('listings',document.querySelectorAll('.admin-tab')[0])">Cancel</button>
+        <button onclick="openNotes(editId)" style="background:#f0f4ff;color:#3b5bdb;border:1px solid #c5d0fc;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;">&#128221; Note</button>
         <button class="a-save" id="adminSaveBtn" onclick="saveProp()">💾 Save Property</button>
       </div>
     </div>
@@ -3543,6 +3549,40 @@ setTimeout(()=>{
     showInstallBanner();
   }
 }, 3000);
+
+// Admin Notes popup
+var _notesId = null;
+function openNotes(id) {
+  if (!isAdmin) return;
+  _notesId = id;
+  var p = props.find(function(x){ return x.id === id; });
+  if (!p && id) { _notesId = id; }
+  var current = document.getElementById('af_phone') ? document.getElementById('af_phone').value : (p ? p.phone||'' : '');
+  document.getElementById('notesModalText').value = current;
+  if (p) document.getElementById('notesModalSub').textContent = p.title + ' · ' + p.location;
+  document.getElementById('notesModal').style.display = 'flex';
+  setTimeout(function(){ document.getElementById('notesModalText').focus(); }, 100);
+}
+function closeNotes() {
+  document.getElementById('notesModal').style.display = 'none';
+  _notesId = null;
+}
+async function saveNotes() {
+  var note = document.getElementById('notesModalText').value.trim();
+  // If editing a property, also update af_phone field
+  var afp = document.getElementById('af_phone');
+  if (afp) afp.value = note;
+  if (_notesId) {
+    try {
+      await fetch('/api/properties/' + _notesId, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({phone:note})});
+      var p = props.find(function(x){ return x.id === _notesId; });
+      if (p) p.phone = note;
+      renderAdminList();
+      showToast('Notes saved!');
+    } catch(e) { alert('Error: ' + e.message); }
+  }
+  closeNotes();
+}
 </script>
 
 <!-- USER LOGIN OVERLAY -->
