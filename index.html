@@ -1229,7 +1229,7 @@ h1 em{color:var(--gold);font-style:italic;}
       </div>
       <div style="border:2px dashed rgba(201,168,76,0.5);border-radius:12px;padding:16px;background:rgba(201,168,76,0.05);margin:0 0 16px 0;"><div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#C9A84C;font-weight:700;margin-bottom:6px;">&#128274; Admin Notes (private)</div><div style="font-size:12px;color:#888;margin-bottom:8px;">Only visible to you. Owner phone, contact info, any private notes.</div><textarea class="at" id="af_phone" rows="3" placeholder="e.g. Owner: +94 77 123 4567, contact via WhatsApp..." style="width:100%;box-sizing:border-box;border-color:rgba(201,168,76,0.4);"></textarea></div><div class="a-actions">
         <button class="a-cancel" onclick="aTab('listings',document.querySelectorAll('.admin-tab')[0])">Cancel</button>
-        <button onclick="openNotes(editId)" style="background:#f0f4ff;color:#3b5bdb;border:1px solid #c5d0fc;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;margin-right:6px;">&#128221; Note</button><button class="a-save" id="adminSaveBtn" onclick="saveProp()">💾 Save Property</button>
+        <button class="a-save" id="adminSaveBtn" onclick="saveProp()">💾 Save Property</button>
       </div>
     </div>
 
@@ -3611,7 +3611,7 @@ setTimeout(()=>{
 }, 3000);
 
 // Wanted feature
-async var _notesId=null;function openNotes(id){if(!isAdmin)return;_notesId=id;var p=props.find(function(x){return x.id===id;});if(!p)return;document.getElementById('notesModalSub').textContent=p.title+' - '+p.location;document.getElementById('notesModalText').value=p.phone||'';document.getElementById('notesModal').style.display='flex';setTimeout(function(){document.getElementById('notesModalText').focus();},100);}function closeNotes(){document.getElementById('notesModal').style.display='none';_notesId=null;}async function saveNotes(){if(!_notesId)return;var note=document.getElementById('notesModalText').value.trim();try{await fetch('/api/properties/'+_notesId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone:note})});var p=props.find(function(x){return x.id===_notesId;});if(p)p.phone=note;renderAdminList();closeNotes();showToast('Notes saved!');}catch(e){alert('Error: '+e.message);}}function openWanted(){
+var _notesId=null;function openNotes(id){if(!isAdmin)return;_notesId=id;var p=props.find(function(x){return x.id===id;});if(!p)return;document.getElementById('notesModalSub').textContent=p.title+' - '+p.location;document.getElementById('notesModalText').value=p.phone||'';document.getElementById('notesModal').style.display='flex';setTimeout(function(){document.getElementById('notesModalText').focus();},100);}function closeNotes(){document.getElementById('notesModal').style.display='none';_notesId=null;}async function saveNotes(){if(!_notesId)return;var note=document.getElementById('notesModalText').value.trim();try{await fetch('/api/properties/'+_notesId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone:note})});var p=props.find(function(x){return x.id===_notesId;});if(p)p.phone=note;renderAdminList();closeNotes();showToast('Notes saved!');}catch(e){alert('Error: '+e.message);}}function openWanted(){
   document.getElementById('wantedOverlay').style.display='block';
   var tb=document.getElementById('tabBuy');if(tb)tb.classList.remove('active');
   var tr=document.getElementById('tabRent');if(tr)tr.classList.remove('active');
