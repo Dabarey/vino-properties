@@ -33,6 +33,7 @@ export default {
     // ── Static frontend ──
     if (path === '/robots.txt') return robotsTxt(request, env);
     if (path === '/sitemap.xml') return sitemapXml(request, env);
+    if (path.startsWith('/photos/')) return servePhoto(request, env, path);
 
     // Pretty listing URL: /property/<slug>/<id>
     const propertyMatch = path.match(/^\/property\/[^/]+\/(\d+)\/?$/);
@@ -88,6 +89,7 @@ export default {
 
       // Photo upload to R2
       if (path === '/api/photos/upload' && method === 'POST') return await uploadPhoto(request, env);
+      if (path === '/api/admin/migrate-photos' && method === 'GET') return await migratePhotosToR2(request, env);
 
       // User accounts
       if (path === '/api/users/login' && method === 'POST') return await loginUser(request, env);
@@ -257,8 +259,81 @@ async function uploadPhoto(request, env) {
   await env.PHOTOS.put(key, file.stream(), {
     httpMetadata: { contentType: file.type || 'image/jpeg' },
   });
-  const url = `https://photos.vino.properties/${key}`;
+  const url = `${SITE_URL}/photos/${key}`;
   return json({ url, key });
+}
+
+// Serves an object straight out of the R2 bucket via this same Worker,
+// e.g. GET /photos/abc123.jpg -> R2 key "photos/abc123.jpg"
+async function servePhoto(request, env, path) {
+  const key = decodeURIComponent(path.replace(/^\/photos\//, ''));
+  const obj = await env.PHOTOS.get('photos/' + key);
+  if (!obj) return new Response('Not found', { status: 404 });
+  return new Response(obj.body, {
+    headers: {
+      'Content-Type': (obj.httpMetadata && obj.httpMetadata.contentType) || 'image/jpeg',
+      'Cache-Control': 'public, max-age=31536000, immutable',
+    },
+  });
+}
+
+// One-time migration: moves base64-encoded photos that are sitting directly
+// in the D1 `properties.photos` column out into R2, replacing them with
+// lightweight URLs. Safe to call repeatedly (idempotent) — call again if
+// `remaining` in the response is still > 0.
+async function migratePhotosToR2(request, env) {
+  const url = new URL(request.url);
+  const secret = url.searchParams.get('secret');
+  if (secret !== 'vino-migrate-2026') return err('Forbidden', 403);
+  const limit = Math.min(parseInt(url.searchParams.get('limit') || '15', 10), 30);
+
+  const { results } = await env.DB.prepare(
+    `SELECT id, photos FROM properties WHERE photos LIKE '%data:%' LIMIT ?`
+  ).bind(limit).all();
+
+  let migrated = 0;
+  const errors = [];
+
+  for (const row of results) {
+    try {
+      let photoList;
+      try { photoList = JSON.parse(row.photos); } catch { photoList = []; }
+      if (!Array.isArray(photoList)) photoList = [];
+
+      const newUrls = [];
+      for (let i = 0; i < photoList.length; i++) {
+        const item = photoList[i];
+        if (typeof item !== 'string' || !item.startsWith('data:')) {
+          newUrls.push(item); // already a URL, keep as-is
+          continue;
+        }
+        const match = item.match(/^data:([^;]+);base64,(.*)$/);
+        if (!match) continue;
+        const contentType = match[1] || 'image/jpeg';
+        const base64Data = match[2];
+        const binary = atob(base64Data);
+        const bytes = new Uint8Array(binary.length);
+        for (let j = 0; j < binary.length; j++) bytes[j] = binary.charCodeAt(j);
+        const ext = contentType.split('/')[1] || 'jpg';
+        const key = `photos/prop-${row.id}-${i}-${crypto.randomUUID()}.${ext}`;
+        await env.PHOTOS.put(key, bytes, { httpMetadata: { contentType } });
+        newUrls.push(`${SITE_URL}/photos/${key}`);
+      }
+
+      await env.DB.prepare('UPDATE properties SET photos=? WHERE id=?')
+        .bind(JSON.stringify(newUrls), row.id).run();
+      migrated++;
+    } catch (e) {
+      errors.push({ id: row.id, error: e.message });
+    }
+  }
+
+  const { results: remainingRows } = await env.DB.prepare(
+    `SELECT COUNT(*) as cnt FROM properties WHERE photos LIKE '%data:%'`
+  ).all();
+  const remaining = remainingRows[0] ? remainingRows[0].cnt : 0;
+
+  return json({ migrated, remaining, errors });
 }
 
 // ─────────────────────────────────────────────
