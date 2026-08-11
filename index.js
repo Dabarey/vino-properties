@@ -133,17 +133,19 @@ export default {
 // PROPERTIES
 // ─────────────────────────────────────────────
 async function listProperties(request, env) {
-  // NOTE: 'photos' is intentionally excluded here. Some listings have
-  // large base64-encoded images stored directly in that column, and
-  // including it in the bulk listing query can make the response too
-  // large, causing the whole endpoint to fail. Full photos are fetched
-  // per-listing on demand via getPropertyPhotos() when a property is opened.
+  // NOTE: full base64 photo blobs are still excluded here (some are ~1-2MB
+  // each and would blow up this response). But once a property's photos
+  // have been migrated to R2 (see migratePhotosToR2), 'photos' just holds
+  // small URL strings — those are cheap enough to include directly, so
+  // thumbnails come back automatically as more properties get migrated,
+  // with no further deploy needed.
   const { results } = await env.DB.prepare(
     `SELECT id, type, title, location, province, price, beds, baths, area, land,
             land_perches, img, amenities, deed, badge, badge_key, description, link,
             listing_mode, country, boosted, boosted_until, boosted_days, created_at,
             phone, admin_notes,
-            CASE WHEN photos IS NOT NULL AND photos != '[]' AND photos != '' THEN 1 ELSE 0 END AS has_photos
+            CASE WHEN photos IS NOT NULL AND photos != '[]' AND photos != '' THEN 1 ELSE 0 END AS has_photos,
+            CASE WHEN photos IS NOT NULL AND length(photos) < 2000 THEN photos ELSE NULL END AS photos
      FROM properties ORDER BY
        CASE WHEN boosted=1 AND (boosted_until IS NULL OR boosted_until > datetime('now')) THEN 0 ELSE 1 END,
        created_at DESC`
