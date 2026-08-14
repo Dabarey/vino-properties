@@ -652,6 +652,7 @@ a{color:#C9A84C;}
 }
 
 
+async function sitemapXml(request, env) {
   let urls = [
     { loc: `${SITE_URL}/`, changefreq: 'daily', priority: '1.0' },
   ];
