@@ -268,7 +268,7 @@ async function uploadPhoto(request, env) {
 // e.g. GET /photos/abc123.jpg -> R2 key "photos/abc123.jpg"
 async function servePhoto(request, env, path) {
   const key = decodeURIComponent(path.replace(/^\/photos\//, ''));
-  const obj = await env.PHOTOS.get('photos/' + key);
+  const obj = await env.PHOTOS.get(key);
   if (!obj) return new Response('Not found', { status: 404 });
   return new Response(obj.body, {
     headers: {
