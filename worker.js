@@ -150,6 +150,70 @@ async function recordEarning(env, { creatorId, payerId, source, ref, gross }) {
   return { id, inserted: !!(res.meta && res.meta.changes) };
 }
 
+// Single earnings calculation, shared by /api/balance (dashboard card) and
+// /api/payout/balance (withdrawal screen). Two endpoints computing this
+// separately is how the withdrawal figure went stale.
+async function computeEarnings(env, creatorId) {
+  await ensureEarnings(env);
+  const led = await env.DB.prepare(
+    `SELECT source, COALESCE(SUM(gross),0) as gross, COALESCE(SUM(net),0) as net, COUNT(*) as n
+     FROM earnings WHERE creator_id=? GROUP BY source`
+  ).bind(creatorId).all().catch(() => null);
+
+  const by = { subscription:{gross:0,net:0,n:0}, tip:{gross:0,net:0,n:0},
+               sale:{gross:0,net:0,n:0}, ppv:{gross:0,net:0,n:0} };
+  let ledgerRows = 0;
+  for (const r of (led?.results || [])) {
+    if (!by[r.source]) by[r.source] = {gross:0,net:0,n:0};
+    by[r.source] = { gross:Number(r.gross||0), net:Number(r.net||0), n:Number(r.n||0) };
+    ledgerRows += Number(r.n || 0);
+  }
+
+  // Fallback for creators who earned before the ledger existed.
+  if (ledgerRows === 0) {
+    const t = await env.DB.prepare(
+      `SELECT COALESCE(SUM(amount),0) as total FROM tips WHERE creator_id=?`
+    ).bind(creatorId).first().catch(()=>null);
+    const sb = await env.DB.prepare(
+      `SELECT COALESCE(SUM(price),0) as total FROM subscriptions WHERE creator_id=? AND status='active'`
+    ).bind(creatorId).first().catch(()=>null);
+    const sl = await env.DB.prepare(
+      `SELECT COALESCE(SUM(pu.price),0) as total FROM purchases pu
+       LEFT JOIN products p ON pu.product_id = p.id WHERE p.creator_id=?`
+    ).bind(creatorId).first().catch(()=>null);
+    // tips.amount and purchases.price are stored NET; subscriptions.price is GROSS.
+    by.tip.net = Number(t?.total || 0);
+    by.sale.net = Number(sl?.total || 0);
+    by.subscription.gross = Number(sb?.total || 0);
+    by.subscription.net = netToCreator(by.subscription.gross);
+  }
+
+  const totalEarned = by.subscription.net + by.tip.net + by.sale.net + by.ppv.net;
+
+  let withdrawn = 0;
+  for (const tbl of ["payouts", "payout_requests"]) {
+    const r = await env.DB.prepare(
+      `SELECT COALESCE(SUM(amount),0) as total FROM ${tbl}
+       WHERE creator_id=? AND COALESCE(status,'') NOT IN ('rejected','failed','cancelled')`
+    ).bind(creatorId).first().catch(() => null);
+    if (r) withdrawn += Number(r.total || 0);
+  }
+
+  const r2 = (n) => Math.round(Number(n || 0) * 100) / 100;
+  return {
+    ledger_rows: ledgerRows,
+    total_earned: r2(totalEarned),
+    withdrawn: r2(withdrawn),
+    available: Math.max(0, r2(totalEarned - withdrawn)),
+    breakdown: {
+      subscription: { net: r2(by.subscription.net), gross: r2(by.subscription.gross), count: by.subscription.n },
+      tip:  { net: r2(by.tip.net),  count: by.tip.n },
+      sale: { net: r2(by.sale.net), count: by.sale.n },
+      ppv:  { net: r2(by.ppv.net),  count: by.ppv.n }
+    }
+  };
+}
+
 async function creditBalance(env, creatorId, amountUsd) {
   const creatorEarns = netToCreator(amountUsd);
   if (!creatorId || creatorEarns <= 0) return;
@@ -254,9 +318,20 @@ var worker_default = {
     if (path === "/api/payout/balance" && method === "GET") {
       const creatorId = url.searchParams.get("creator_id");
       if (!creatorId) return err("Missing creator_id");
-      const bal = await env.DB.prepare("SELECT balance, lifetime FROM balances WHERE creator_id=?").bind(creatorId).first();
-      const history = await env.DB.prepare("SELECT * FROM payouts WHERE creator_id=? ORDER BY requested_at DESC LIMIT 20").bind(creatorId).all();
-      return json({ balance: bal?.balance||0, lifetime: bal?.lifetime||0, history: history.results||[] });
+      // This is the number on the withdrawal screen. It must come from the same
+      // earnings ledger as /api/balance — reading the legacy `balances` table
+      // here is what kept the dashboard stale.
+      const e = await computeEarnings(env, creatorId);
+      const history = await env.DB.prepare("SELECT * FROM payouts WHERE creator_id=? ORDER BY requested_at DESC LIMIT 20").bind(creatorId).all().catch(() => null);
+      return json({
+        balance: e.available,
+        available: e.available,
+        lifetime: e.total_earned,
+        withdrawn: e.withdrawn,
+        platform_fee_rate: PLATFORM_RATE,
+        breakdown: e.breakdown,
+        history: history?.results || []
+      });
     }
     if (path === "/api/payout/settings" && method === "GET") {
       const creatorId = url.searchParams.get("creator_id");
@@ -1330,83 +1405,28 @@ var worker_default = {
       if (path === "/api/balance" && method === "GET") {
         const userId = url.searchParams.get("user_id");
         if (!userId) return err("Missing user_id");
-        await ensureEarnings(env);
-
-        // Single source of truth: one row per real payment, already net of the
-        // platform cut, broken out by source.
-        const led = await env.DB.prepare(
-          `SELECT source,
-                  COALESCE(SUM(gross),0) as gross,
-                  COALESCE(SUM(net),0)   as net,
-                  COUNT(*)               as n
-           FROM earnings WHERE creator_id=? GROUP BY source`
-        ).bind(userId).all().catch(() => null);
-
-        const by = { subscription:{gross:0,net:0,n:0}, tip:{gross:0,net:0,n:0},
-                     sale:{gross:0,net:0,n:0}, ppv:{gross:0,net:0,n:0} };
-        let ledgerRows = 0;
-        for (const r of (led?.results || [])) {
-          if (!by[r.source]) by[r.source] = {gross:0,net:0,n:0};
-          by[r.source] = { gross:Number(r.gross||0), net:Number(r.net||0), n:Number(r.n||0) };
-          ledgerRows += Number(r.n || 0);
-        }
-
-        // Fallback for creators earning before the ledger existed. Derived from
-        // the old tables; used only when this creator has no ledger rows at all,
-        // so the two can never be added together.
-        if (ledgerRows === 0) {
-          const t = await env.DB.prepare(
-            `SELECT COALESCE(SUM(amount),0) as total FROM tips WHERE creator_id=?`
-          ).bind(userId).first().catch(()=>null);
-          const sb = await env.DB.prepare(
-            `SELECT COALESCE(SUM(price),0) as total FROM subscriptions WHERE creator_id=? AND status='active'`
-          ).bind(userId).first().catch(()=>null);
-          const sl = await env.DB.prepare(
-            `SELECT COALESCE(SUM(pu.price),0) as total FROM purchases pu
-             LEFT JOIN products p ON pu.product_id = p.id WHERE p.creator_id=?`
-          ).bind(userId).first().catch(()=>null);
-          // tips.amount and purchases.price are stored NET; subscriptions.price is GROSS.
-          by.tip.net   = Number(t?.total || 0);
-          by.sale.net  = Number(sl?.total || 0);
-          by.subscription.gross = Number(sb?.total || 0);
-          by.subscription.net   = netToCreator(by.subscription.gross);
-        }
-
+        const e = await computeEarnings(env, userId);
         const subsCount = await env.DB.prepare(
           `SELECT COUNT(*) as count FROM subscriptions WHERE creator_id=? AND status='active'`
         ).bind(userId).first().catch(()=>null);
-
-        const totalEarned = by.subscription.net + by.tip.net + by.sale.net + by.ppv.net;
-
-        // Money already sent or queued must not stay withdrawable.
-        let withdrawn = 0;
-        for (const tbl of ["payouts", "payout_requests"]) {
-          const r = await env.DB.prepare(
-            `SELECT COALESCE(SUM(amount),0) as total FROM ${tbl}
-             WHERE creator_id=? AND COALESCE(status,'') NOT IN ('rejected','failed','cancelled')`
-          ).bind(userId).first().catch(() => null);
-          if (r) withdrawn += Number(r.total || 0);
-        }
-        const r2 = (n) => Math.round(Number(n || 0) * 100) / 100;
-        const available = Math.max(0, r2(totalEarned - withdrawn));
-
         return json({
-          balance: available,
-          available,
-          total_earned: r2(totalEarned),
-          withdrawn: r2(withdrawn),
+          balance: e.available,
+          available: e.available,
+          total_earned: e.total_earned,
+          withdrawn: e.withdrawn,
           platform_fee_rate: PLATFORM_RATE,
-          ledger_rows: ledgerRows,
+          ledger_rows: e.ledger_rows,
           subscriber_count: Number(subsCount?.count || 0),
-          subs_total:  r2(by.subscription.net),
-          subs_gross:  r2(by.subscription.gross),
-          subs_payments: by.subscription.n,
-          tips_total:  r2(by.tip.net),
-          tips_count:  by.tip.n,
-          sales_total: r2(by.sale.net),
-          sales_count: by.sale.n,
-          ppv_total:   r2(by.ppv.net),
-          ppv_count:   by.ppv.n
+          subs_total: e.breakdown.subscription.net,
+          subs_gross: e.breakdown.subscription.gross,
+          subs_payments: e.breakdown.subscription.count,
+          tips_total: e.breakdown.tip.net,
+          tips_count: e.breakdown.tip.count,
+          sales_total: e.breakdown.sale.net,
+          sales_count: e.breakdown.sale.count,
+          ppv_total: e.breakdown.ppv.net,
+          ppv_count: e.breakdown.ppv.count,
+          breakdown: e.breakdown
         });
       }
       if (path === "/api/notifications" && method === "GET") {
