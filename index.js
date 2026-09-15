@@ -750,6 +750,42 @@ function injectListingMeta(html, p, url) {
     `<script type="application/ld+json" id="ldJsonBlock">${JSON.stringify(jsonLd)}</script>`
   );
 
+  // Server-render the actual listing content into the page body so search
+  // engines (and users with JS disabled/slow) see real text immediately,
+  // instead of relying entirely on client-side JS to fetch and paint it.
+  const beds = Number(p.beds) || 0;
+  const baths = Number(p.baths) || 0;
+  const area = p.area && p.area !== '—' ? p.area : '';
+  const land = p.land && p.land !== '—' ? p.land : '';
+  const deed = p.deed || 'freehold';
+  const statParts = [];
+  if (beds > 0) statParts.push(`${beds} Bed`);
+  if (baths > 0) statParts.push(`${baths} Bath`);
+  if (area) statParts.push(escapeHtmlAttr(area));
+  if (land) statParts.push(escapeHtmlAttr(land));
+  statParts.push(escapeHtmlAttr(deed.charAt(0).toUpperCase() + deed.slice(1)));
+  statParts.push(escapeHtmlAttr(p.province || ''));
+  const statsHtml = statParts
+    .filter(Boolean)
+    .map((s) => `<span style="display:inline-block;background:#F5F0E8;border:1px solid #E0D8CC;border-radius:100px;padding:5px 12px;font-size:13px;color:#1A1612;margin:0 6px 6px 0;">${s}</span>`)
+    .join('');
+  const descHtml = escapeHtmlAttr(p.description || '').replace(/\n/g, '<br>');
+  const imgHtml =
+    p.photos && p.photos.length
+      ? `<img src="${escapeHtmlAttr(p.photos[0])}" alt="${escapeHtmlAttr(p.title || 'Property')} — ${escapeHtmlAttr(p.location || '')}" style="width:100%;max-width:640px;height:auto;border-radius:14px;margin-bottom:16px;display:block;">`
+      : '';
+  const ssrBlock = `
+<section id="ssrListingContent" style="max-width:720px;margin:24px auto 0;padding:0 20px;font-family:'DM Sans',sans-serif;">
+  <nav style="font-size:12px;color:#7A7068;margin-bottom:14px;"><a href="/" style="color:#7A7068;text-decoration:none;">Home</a> &rsaquo; ${escapeHtmlAttr(p.province || 'Sri Lanka')} &rsaquo; ${escapeHtmlAttr(p.location || '')}</nav>
+  <h1 style="font-family:'Playfair Display',serif;font-size:clamp(22px,4vw,32px);margin-bottom:6px;color:#1A1612;">${escapeHtmlAttr(p.title || 'Property')}</h1>
+  <p style="color:#7A7068;font-size:14px;margin-bottom:16px;">${escapeHtmlAttr(p.location || '')}${p.province ? ', ' + escapeHtmlAttr(p.province) : ''}</p>
+  ${imgHtml}
+  <p style="font-family:'Playfair Display',serif;font-size:26px;font-weight:700;color:#1A1612;margin-bottom:12px;">${escapeHtmlAttr(priceText)}</p>
+  <div style="margin-bottom:18px;">${statsHtml}</div>
+  <div style="line-height:1.7;color:#3a332c;font-size:15px;white-space:pre-line;">${descHtml}</div>
+</section>`;
+  out = out.replace('<!-- LOADING SCREEN -->', ssrBlock + '\n<!-- LOADING SCREEN -->');
+
   return out;
 }
 
