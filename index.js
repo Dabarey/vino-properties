@@ -76,7 +76,13 @@ export default {
           }
         } catch (e) { /* fall through to default HTML */ }
       }
-      return new Response(HTML, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+      let liveCount = null;
+      try {
+        const row = await env.DB.prepare('SELECT COUNT(*) as cnt FROM properties').first();
+        liveCount = row ? row.cnt : null;
+      } catch (e) { /* fall through to static placeholder */ }
+      const html = injectHomeStats(HTML, liveCount);
+      return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
     }
 
     // ── API routes ──
@@ -699,6 +705,19 @@ function escapeXml(s) {
 
 function escapeHtmlAttr(s) {
   return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// Replaces the hardcoded "10" placeholders in the static HTML template
+// (statTotal, countDisplay) with the real, current property count, so the
+// server-rendered page shown to crawlers and users before JS runs reflects
+// reality instead of a stale hardcoded number.
+function injectHomeStats(html, liveCount) {
+  if (liveCount == null || Number.isNaN(Number(liveCount))) return html;
+  const n = String(liveCount);
+  let out = html;
+  out = out.replace('<strong id="statTotal">10</strong>', `<strong id="statTotal">${n}</strong>`);
+  out = out.replace('<span id="countDisplay">10</span>', `<span id="countDisplay">${n}</span>`);
+  return out;
 }
 
 // Injects listing-specific <title>, meta description, canonical, Open Graph,
