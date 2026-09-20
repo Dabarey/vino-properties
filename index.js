@@ -891,10 +891,13 @@ function injectListingMeta(html, p, url) {
     .map((s) => `<span style="display:inline-block;background:#F5F0E8;border:1px solid #E0D8CC;border-radius:100px;padding:5px 12px;font-size:13px;color:#1A1612;margin:0 6px 6px 0;">${s}</span>`)
     .join('');
   const descHtml = escapeHtmlAttr(p.description || '').replace(/\n/g, '<br>');
-  const heroImg = p.photos && p.photos.length ? escapeHtmlAttr(p.photos[0]) : '';
-  const heroHtml = heroImg
-    ? `<div style="width:100%;height:340px;background:#111 url('${heroImg}') center/cover no-repeat;"></div>`
+  const photos = (p.photos && p.photos.length ? p.photos : []).slice(0, 12);
+  const heroHtml = photos.length
+    ? `<div style="width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;display:flex;gap:4px;scroll-snap-type:x mandatory;background:#111;">${photos
+        .map((src) => `<img src="${escapeHtmlAttr(src)}" alt="${escapeHtmlAttr(p.title || 'Property')}" style="height:340px;width:auto;max-width:none;flex-shrink:0;object-fit:cover;scroll-snap-align:start;" loading="lazy">`)
+        .join('')}</div>`
     : `<div style="width:100%;height:220px;background:linear-gradient(135deg,#1a1208,#2c1f08 40%,#3d2a0a);display:flex;align-items:center;justify-content:center;font-size:56px;">${HOME_TYPE_EMOJIS[p.type] || '🏠'}</div>`;
+  const photoCountNote = photos.length > 1 ? `<p style="font-size:11px;color:#7A7068;margin:6px 20px 0;">📷 ${photos.length} photos — swipe to see more</p>` : '';
   const overviewItems = [];
   if (beds > 0) overviewItems.push({ icon: '🛏', label: beds + (beds === 1 ? ' Bedroom' : ' Bedrooms') });
   if (baths > 0) overviewItems.push({ icon: '🚿', label: baths + (baths === 1 ? ' Bathroom' : ' Bathrooms') });
@@ -917,8 +920,18 @@ function injectListingMeta(html, p, url) {
     .map(([k, v], i) => `<div style="display:flex;justify-content:space-between;padding:11px 0;${i < detailRows.length - 1 ? 'border-bottom:1px solid #EFEAE0;' : ''}"><span style="color:#7A7068;font-size:13px;">${k}</span><span style="color:#1A1612;font-size:13px;font-weight:700;">${v}</span></div>`)
     .join('');
   const ssrBlock = `
+<style id="ssrPageStyle">
+  /* On a direct listing page, the full marketing homepage (giant hero,
+     country pills, huge search bar, sidebar filters) is redundant below
+     the property details, so it's hidden here \u2014 leaving just the top
+     nav, this listing, and the property grid to browse more listings. */
+  header, .sidebar, .mob-filter-btn { display: none !important; }
+  .page-body { grid-template-columns: 1fr !important; padding-top: 8px !important; }
+  .listing-tabs { display: none !important; }
+</style>
 <section id="ssrListingContent" style="font-family:'DM Sans',sans-serif;background:#f0ede8;">
   ${heroHtml}
+  ${photoCountNote}
   <div style="max-width:760px;margin:0 auto;padding:22px 20px 40px;">
     <nav style="font-size:12px;color:#7A7068;margin-bottom:14px;"><a href="/" style="color:#7A7068;text-decoration:none;">Home</a> &rsaquo; ${escapeHtmlAttr(p.province || 'Sri Lanka')} &rsaquo; ${escapeHtmlAttr(p.location || '')}</nav>
     <h1 style="font-family:'Playfair Display',serif;font-weight:400;font-size:clamp(24px,4vw,34px);margin-bottom:6px;color:#1A1612;line-height:1.2;">${escapeHtmlAttr(p.title || 'Property')}</h1>
@@ -933,8 +946,9 @@ function injectListingMeta(html, p, url) {
       <h2 style="font-family:'Playfair Display',serif;font-size:18px;font-weight:700;color:#1A1612;margin-bottom:10px;">Description</h2>
       <div style="line-height:1.75;color:#3a332c;font-size:14.5px;">${descHtml}</div>
     </div>
-    <p style="font-size:12px;color:#7A7068;">Tap the search bar below to see this listing's live details, photos and contact options, or browse more properties.</p>
+    <p style="font-size:12px;color:#7A7068;">Contact details and more properties are available below.</p>
   </div>
+  <h2 style="font-family:'Playfair Display',serif;font-size:20px;font-weight:700;color:#1A1612;text-align:center;margin:8px 0 18px;">More Properties</h2>
 </section>`;
   out = out.replace('<!-- LOADING SCREEN -->', ssrBlock + '\n<!-- LOADING SCREEN -->');
 
