@@ -1,4 +1,5 @@
-Ads.txt--1b04dd6ed7443d193cdc794866dcd6ab6818a5b736d71d55b16dd879937d
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4939590984863448"
+     crossorigin="anonymous"></script>
 Content-Disposition: form-data; name="index.js"
 
 var __defProp = Object.defineProperty;
