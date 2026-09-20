@@ -270,6 +270,13 @@ function propertyColumns(body) {
     { col: 'listing_mode', val: safe(body.listing_mode, 'buy') },
     { col: 'country',      val: safe(body.country, 'LK') },
     { col: 'photos',       val: body.photos ? JSON.stringify(body.photos) : null },
+    // 'thumb' is what actually renders on the card grid (see listProperties,
+    // which returns thumb + has_photos but not the full photos array for
+    // performance). It used to only get populated by the manual "Migrate
+    // Photos" admin tool for older listings — meaning brand new listings
+    // with photos never showed an image on their card at all. Setting it
+    // here from the first photo whenever photos are provided fixes that.
+    { col: 'thumb',        val: (body.photos && body.photos.length) ? body.photos[0] : null },
     { col: 'boosted',      val: safe(body.boosted, 0) },
     { col: 'boosted_until',val: safe(body.boosted_until) },
     { col: 'boosted_days', val: safe(body.boosted_days, 0) },
@@ -919,23 +926,30 @@ function injectListingMeta(html, p, url) {
   const detailsHtml = detailRows
     .map(([k, v], i) => `<div style="display:flex;justify-content:space-between;padding:11px 0;${i < detailRows.length - 1 ? 'border-bottom:1px solid #EFEAE0;' : ''}"><span style="color:#7A7068;font-size:13px;">${k}</span><span style="color:#1A1612;font-size:13px;font-weight:700;">${v}</span></div>`)
     .join('');
+  let postedDate = '';
+  try {
+    if (p.created_at) {
+      postedDate = new Date(p.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+    }
+  } catch (e) {}
+  const waMsg = encodeURIComponent(`Hi! I'm interested in: ${p.title || 'this property'} — ${p.location || ''}\nPrice: ${priceText}\nPlease send more details.`);
+  const waLink = `https://wa.me/94752007005?text=${waMsg}`;
   const ssrBlock = `
 <style id="ssrPageStyle">
-  /* On a direct listing page, the full marketing homepage (giant hero,
-     country pills, huge search bar, sidebar filters) is redundant below
-     the property details, so it's hidden here \u2014 leaving just the top
-     nav, this listing, and the property grid to browse more listings. */
-  header, .sidebar, .mob-filter-btn { display: none !important; }
-  .page-body { grid-template-columns: 1fr !important; padding-top: 8px !important; }
-  .listing-tabs { display: none !important; }
+  /* This is a single listing's own page \u2014 show only the poster itself,
+     nothing else from the rest of the site (no hero, no search, no
+     sidebar, no other listings). */
+  header, .sidebar, .mob-filter-btn, .topbar, main, .page-body > main, .wa-float { display: none !important; }
+  .page-body { display: block !important; padding: 0 !important; }
 </style>
-<section id="ssrListingContent" style="font-family:'DM Sans',sans-serif;background:#f0ede8;">
+<section id="ssrListingContent" style="font-family:'DM Sans',sans-serif;background:#f0ede8;min-height:100vh;">
   ${heroHtml}
   ${photoCountNote}
-  <div style="max-width:760px;margin:0 auto;padding:22px 20px 40px;">
+  <div style="max-width:760px;margin:0 auto;padding:22px 20px 60px;">
     <nav style="font-size:12px;color:#7A7068;margin-bottom:14px;"><a href="/" style="color:#7A7068;text-decoration:none;">Home</a> &rsaquo; ${escapeHtmlAttr(p.province || 'Sri Lanka')} &rsaquo; ${escapeHtmlAttr(p.location || '')}</nav>
     <h1 style="font-family:'Playfair Display',serif;font-weight:400;font-size:clamp(24px,4vw,34px);margin-bottom:6px;color:#1A1612;line-height:1.2;">${escapeHtmlAttr(p.title || 'Property')}</h1>
-    <p style="color:#7A7068;font-size:14px;margin-bottom:18px;">📍 ${escapeHtmlAttr(p.location || '')}${p.province ? ', ' + escapeHtmlAttr(p.province) : ''}</p>
+    <p style="color:#7A7068;font-size:14px;margin-bottom:6px;">📍 ${escapeHtmlAttr(p.location || '')}${p.province ? ', ' + escapeHtmlAttr(p.province) : ''}</p>
+    ${postedDate ? `<p style="color:#7A7068;font-size:12px;margin-bottom:18px;">🕐 Posted on ${postedDate}</p>` : ''}
     <p style="font-family:'Playfair Display',serif;font-size:30px;font-weight:700;color:#1A1612;margin-bottom:20px;">${escapeHtmlAttr(priceText)}</p>
     ${overviewItems.length ? `<div style="background:#fff;border:1px solid #E0D8CC;border-radius:14px;padding:18px 8px;display:flex;justify-content:center;margin-bottom:24px;">${overviewHtml}</div>` : ''}
     <div style="background:#fff;border:1px solid #E0D8CC;border-radius:14px;padding:20px 22px;margin-bottom:24px;">
@@ -946,9 +960,8 @@ function injectListingMeta(html, p, url) {
       <h2 style="font-family:'Playfair Display',serif;font-size:18px;font-weight:700;color:#1A1612;margin-bottom:10px;">Description</h2>
       <div style="line-height:1.75;color:#3a332c;font-size:14.5px;">${descHtml}</div>
     </div>
-    <p style="font-size:12px;color:#7A7068;">Contact details and more properties are available below.</p>
+    <a href="${waLink}" target="_blank" rel="noopener" style="display:flex;align-items:center;justify-content:center;gap:8px;background:#25D366;color:#fff;text-decoration:none;border-radius:10px;padding:14px;font-weight:700;font-size:15px;">💬 WhatsApp About This Property</a>
   </div>
-  <h2 style="font-family:'Playfair Display',serif;font-size:20px;font-weight:700;color:#1A1612;text-align:center;margin:8px 0 18px;">More Properties</h2>
 </section>`;
   out = out.replace('<!-- LOADING SCREEN -->', ssrBlock + '\n<!-- LOADING SCREEN -->');
 
