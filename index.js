@@ -936,11 +936,12 @@ function injectListingMeta(html, p, url) {
   const waLink = `https://wa.me/94752007005?text=${waMsg}`;
   const ssrBlock = `
 <style id="ssrPageStyle">
-  /* This is a single listing's own page \u2014 keep the top nav bar (same
-     as the homepage) but hide everything else from the rest of the site:
-     the big hero, search, sidebar, other listings, and the footer (which
-     has its own unrelated "Ad Packages" / "Popular Locations" panels). */
-  header, .sidebar, .mob-filter-btn, main, .page-body > main, .wa-float, footer { display: none !important; }
+  /* This is a single listing's own page \u2014 keep the full header/hero
+     (same as the homepage) at the top, above the listing itself. Only
+     hide what's actually irrelevant here: the sidebar filters, the other
+     listings grid, and the footer's unrelated "Ad Packages" /
+     "Popular Locations" panels. */
+  .sidebar, .mob-filter-btn, main, .page-body > main, .wa-float, footer { display: none !important; }
   .page-body { display: block !important; padding: 0 !important; }
 </style>
 <section id="ssrListingContent" style="font-family:'DM Sans',sans-serif;background:#f0ede8;min-height:100vh;">
