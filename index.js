@@ -96,7 +96,7 @@ export default {
            FROM properties ORDER BY
              CASE WHEN boosted=1 AND (boosted_until IS NULL OR boosted_until > datetime('now')) THEN 0 ELSE 1 END,
              created_at DESC
-           LIMIT 24`
+           LIMIT 8`
         ).all();
         homeListings = results;
       } catch (e) { /* fall through to empty list */ }
